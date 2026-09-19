@@ -9,8 +9,8 @@ Estimar diariamente el nivel de riesgo de incendio forestal por municipio, evalu
 
 ## Miembros
  
-Cristina Puértolas Rebollar
-Hikari Lheku Barrio Martín
+- Cristina Puértolas Rebollar
+- Hikari Lheku Barrio Martín
  
 Reparto de tareas detallado en `docs/NF1_Presentacion_y_Viabilidad.pdf`.
 
