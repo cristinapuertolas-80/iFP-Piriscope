@@ -1,8 +1,10 @@
+<p align="center"><img src="docs/assets/logo-piriscope.svg" alt="Logo de Piriscope, un árbol frente a llamas con una lupa delante" width="150"/></p>
+
 # Piriscope
 Proyecto para construir sistema predictivo basado en aprendizaje supervisado que permita estimar diariamente el riesgo de incendio forestal por municipio.
 
 ![Estado](https://img.shields.io/badge/Estado-En%20desarrollo-orange)
-![Fase](https://img.shields.io/badge/Fase-0-lightgrey)
+![Fase](https://img.shields.io/badge/Fase-1-lightgrey)
 
 ## 🎯 Objetivo
  
