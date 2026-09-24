@@ -2,20 +2,18 @@
 
 ## Reglas base
 - Toda tarea tiene una issue asociada.
-- No se realiza **merge** sin **PR** aprobado.
+- No se realiza **merge** sin **PR (Pull Request)** aprobado.
 - Documentar decisiones en **"docs/decisiones.md"**.
 
 ## Ramas
 - `main`: nunca se commitea directo.
 - Todo cambio se realiza con un **Pull Request**.
 
-## Pull Requests
-
 ### Nomenclatura
 
 Los cambios de realizan en ramas con la nomenclatura **tipo/descripción**.
 
-#### Tipos
+### Tipos
 
 - `fix`: arreglo de bugs.
 - `feat`: añadir features.
