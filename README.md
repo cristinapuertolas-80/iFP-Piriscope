@@ -28,8 +28,29 @@ Reparto de tareas detallado en [Presentación y viabilidad](docs/NF1_Presentacio
 
 ## 📁 Estructura del repositorio
 ```
-├── docs/          #Documentación del proyecto
-├── src/           #Código fuente
-├── data/          #Datos (no versionados)
-└── environment/   #Configuración del entorno
+repo/
+├ docs/ #Documentación del proyecto
+│├ NF1_Presentacion_y_Viabilidad.pdf
+│├ NF2_Documentacion_y_Diseno_Tecnico.pdf
+│├ arquitectura.png
+│└	decisiones.md
+│
+├ src/  #Código fuente
+│├ ingest/
+│├ features/
+│├ ml/
+│├ explainability/
+│└ dashboard/
+│
+│├ data/
+│├ bronze/
+│├ silver/
+│├ gold/
+│└ .gitkeep
+│
+├ models/   #Modelos serializados
+├ enviroment/   #Configuración del entorno
+├ README.md
+├ CONTRIBUTING.md
+└ .gitignore
 ```
