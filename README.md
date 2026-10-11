@@ -1,56 +1,200 @@
 <p align="center"><img src="docs/assets/logo-piriscope.svg" alt="Logo de Piriscope, un árbol frente a llamas con una lupa delante" width="150"/></p>
 
 # Piriscope
-Proyecto para construir sistema predictivo basado en aprendizaje supervisado que permita estimar diariamente el riesgo de incendio forestal por municipio.
+
+**Sistema de estimación diaria de riesgo de incendio forestal por municipio**
+Proyecto del módulo C088 · Proyecto de Inteligencia Artificial y Big Data · Grupo 6
 
 ![Estado](https://img.shields.io/badge/Estado-En%20desarrollo-orange)
-![Fase](https://img.shields.io/badge/Fase-1-lightgrey)
+![Fase](https://img.shields.io/badge/Fase-2%20·%20Diseño%20técnico-lightgrey)
+![Python](https://img.shields.io/badge/Python-3.x-blue)
 
-## 🎯 Objetivo
- 
-Estimar diariamente el nivel de riesgo de incendio forestal por municipio, evaluando el rendimiento del modelo frente a un baseline (índice FWI) y proporcionando una visualización explicable de los resultados, con el fin de apoyar la priorización de recursos de vigilancia y prevención forestal.
- 
-Éxito mínimo: generar una predicción diaria de riesgo para al menos el 80% de los municipios gallegos (región piloto), utilizando exclusivamente fuentes públicas de datos (AEMET, EFFIS).
+---
 
-## 👥 Miembros
- 
-- Cristina Puértolas Rebollar
-- Hikari Lheku Barrio Martín
-- Guillermo Ramón Serrano
- 
-Reparto de tareas detallado en [Presentación y viabilidad](docs/NF1_Presentacion_y_Viabilidad.pdf).
+## 📌 Descripción del proyecto
+
+Los índices de riesgo de incendio forestal en uso, como el **FWI** (Fire Weather Index), se basan casi exclusivamente en variables meteorológicas y no incorporan el patrón histórico real de incendios de cada zona.
+
+**Piriscope** es un sistema de predicción del riesgo relativo de incendio forestal para una región piloto (**Galicia**). Combina datos meteorológicos de **AEMET** con el histórico de incendios de **EGIF-MITECO** para entrenar un modelo supervisado (**XGBoost y/o Random Forest**) que estima, para cada municipio, la **probabilidad de incendio del día siguiente (D+1)** a partir de la información disponible hasta el día D.
+
+El resultado:
+
+- se categoriza en tres niveles de riesgo: **bajo, medio y alto**;
+- se compara con el **FWI de EFFIS/Copernicus** como baseline;
+- se explica con **SHAP**;
+- se presenta en un **dashboard Streamlit** con mapa de Galicia, buscador de municipios, comparación frente al FWI y alternativa tabular al mapa.
+
+### 🎯 Objetivo y criterio de éxito
+
+Generar un pipeline reproducible que produzca predicciones diarias para **al menos el 80 % de los municipios gallegos**, usando **exclusivamente fuentes públicas**, y demostrar con métricas objetivas (**Recall** y **AUC-PR**) su comportamiento frente al baseline FWI.
+
+### ⚠️ Qué no hace el sistema
+
+Piriscope es una **herramienta experimental de apoyo**. No detecta incendios activos, no predice su propagación, no sustituye a los sistemas oficiales de protección civil y no garantiza que un incendio vaya a producirse. Sus resultados son estimaciones probabilísticas, no certezas.
+
+---
+
+## 👥 Integrantes
+
+| Integrante | Rol principal |
+|---|---|
+| Cristina Puértolas Rebollar | Fuentes de datos, ingesta y coordinación general (Management) |
+| Hikari Lheku Barrio Martín | Machine Learning y explicabilidad (ML) |
+| Guillermo Ramón Serrano | Limpieza, normalización, tipado y cruce espacio-temporal (Data Engineering) |
+| Alejandro Escolar Espejo | Presentación de resultados en el dashboard Streamlit (Frontend Dev) |
+
+El reparto define la responsabilidad principal de cada persona; el equipo se apoya mutuamente ante bloqueos. El detalle está en la [documentación técnica](docs/NF2_Documentacion_y_Diseno_Tecnico.pdf).
+
+---
+
+## 🏗️ Arquitectura resumida
+
+<p align="center"><img src="docs/arquitectura.png" alt="Diagrama de arquitectura de Piriscope: fuentes de datos, capas Bronze, Silver y Gold, servicios de Machine Learning y dashboard Streamlit" width="750"/></p>
+
+El sistema se organiza como un **pipeline de datos con arquitectura medallón** (Bronze → Silver → Gold), sobre el que se apoyan los servicios de Machine Learning (en proceso batch) y el dashboard.
+
+| Capa / módulo | Qué hace |
+|---|---|
+| **Fuentes** | AEMET OpenData (meteorología diaria), EGIF-MITECO (partes de incendio), EFFIS/Copernicus (FWI y componentes), INE/CNIG (catálogo y límites municipales) |
+| **Bronze** · `data/bronze` | Datos crudos en su formato original (JSON / Excel / CSV), archivados por fuente y fecha de ingesta, sin modificar |
+| **Silver** · `data/silver` | Limpieza, normalización y tipado en Parquet. Cada municipio se asocia a su estación AEMET más cercana, cada incendio a su código INE y el FWI al centroide del municipio. Controles de calidad |
+| **Gold** · `data/gold` | Variables derivadas (racha de días secos, precipitación acumulada…), dataset municipio-día con la variable objetivo, predicciones y explicaciones SHAP |
+| **ML** · `src/ml` | Entrenamiento offline con partición temporal y geográfica, modelo serializado y versionado en `models/`, inferencia batch D+1 y SHAP |
+| **Dashboard** · `src/dashboard` | Streamlit. **Solo lee la capa Gold**: no entrena ni accede a las fuentes externas |
+
+- **Orquestación:** un único punto de entrada, `run_pipeline.py`, parametrizable por rango de fechas, encadena ingesta → Silver → Gold → entrenamiento/inferencia.
+- **Almacenamiento:** ficheros Parquet y CSV alojados en el dataset de Hugging Face [cpuertolas/piriscope](https://huggingface.co/datasets/cpuertolas/piriscope). No se usa base de datos en esta versión.
+- **Ingesta automática:** workflows programados (cron) de GitHub Actions que suben los datos al dataset usando un token `HF_TOKEN` guardado en los Secrets del repositorio.
+- **Despliegue monolítico:** frontend y backend en Streamlit, pero con la lógica separada en módulos de `src/` que solo se comunican mediante ficheros Parquet y el modelo serializado.
+
+Más detalle en la [documentación y diseño técnico](docs/NF2_Documentacion_y_Diseno_Tecnico.pdf) y en el [registro de decisiones](docs/decisiones.md).
+
+---
+
+## ▶️ Cómo ejecutar
+
+> 🚧 **El proyecto está en fase de diseño.** Los comandos de esta sección describen el funcionamiento previsto; los pasos marcados con ⏳ aún no están implementados.
+
+### 1. Requisitos previos
+
+- Python 3.x y Git
+- Una **API key de AEMET OpenData** (gratuita): se solicita en [opendata.aemet.es](https://opendata.aemet.es/centrodedescargas/inicio)
+- *(Solo para la ingesta automática)* un token de Hugging Face con permiso de escritura sobre el dataset
+
+### 2. Clonar el repositorio e instalar el entorno
+
+```bash
+git clone https://github.com/cristinapuertolas-80/iFP-Piriscope.git
+cd iFP-Piriscope
+
+python -m venv .venv
+source .venv/bin/activate          # En Windows: .venv\Scripts\activate
+
+pip install -r environment/requirements.txt   # ⏳
+```
+
+### 3. Configurar las credenciales
+
+Crea un fichero `.env` en la raíz del proyecto (está excluido en `.gitignore`, **nunca lo subas**):
+
+```env
+AEMET_API_KEY=tu_api_key_de_aemet
+HF_TOKEN=tu_token_de_hugging_face
+```
+
+### 4. Ejecutar el pipeline de datos y el modelo ⏳
+
+```bash
+# Ingesta → Silver → Gold → entrenamiento/inferencia para un rango de fechas
+python run_pipeline.py --desde 2020-01-01 --hasta 2024-12-31
+```
+
+### 5. Lanzar el dashboard ⏳
+
+```bash
+streamlit run src/dashboard/app.py
+```
+
+### 6. Ejecutar los tests ⏳
+
+```bash
+pytest
+```
+
+Los tests también se ejecutan automáticamente con **GitHub Actions** en cada Pull Request.
+
+---
+
+## 🛠️ Tecnologías
+
+| Categoría | Tecnología | Motivo |
+|---|---|---|
+| Lenguaje | **Python** | Amplio ecosistema para datos, ML y visualización |
+| Procesamiento de datos | **pandas** | Suficiente para el volumen previsto (~1,7–3 M filas municipio-día); PySpark solo si se justifica |
+| Modelado | **XGBoost / Random Forest** | Adecuados para datos tabulares y relaciones no lineales |
+| Explicabilidad | **SHAP** | Contribución de cada variable en modelos basados en árboles |
+| Visualización | **Streamlit** | Dashboard funcional rápido a partir de predicciones precalculadas |
+| Geoespacial y mapas | **GeoPandas + Plotly** | Cruce espacial y mapa coroplético sin servidor de mapas |
+| Almacenamiento | **Parquet / CSV · Hugging Face Datasets** | Ligero y suficiente para el prototipo |
+| Pruebas e integración | **pytest + GitHub Actions** | Tests automáticos en cada Pull Request |
+| Control de versiones | **Git / GitHub** | Ramas, Pull Requests, issues y [tablero Kanban](https://github.com/users/cristinapuertolas-80/projects/1/views/1) |
+
+---
+
+## 📁 Estructura del repositorio
+
+```
+repo/
+├── docs/                                  # Documentación del proyecto
+│   ├── NF1_Presentacion_y_Viabilidad.pdf
+│   ├── NF2_Documentacion_y_Diseno_Tecnico.pdf
+│   ├── arquitectura.png                   # Diagrama de arquitectura
+│   ├── municipios_reservados.csv          # Municipios reservados para evaluación geográfica
+│   ├── tabla_equivalencias.csv            # Equivalencias de códigos INE históricos
+│   └── decisiones.md                      # Registro de decisiones técnicas
+│
+├── src/                                   # Código fuente
+│   ├── ingest/                            # Descarga e ingesta de las fuentes
+│   ├── features/                          # Limpieza, cruce y variables derivadas
+│   ├── ml/                                # Entrenamiento, evaluación e inferencia
+│   ├── explainability/                    # Explicaciones SHAP
+│   └── dashboard/                         # Aplicación Streamlit
+│
+├── data/                                  # Datos (no versionados, solo .gitkeep)
+│   ├── bronze/                            # Datos crudos originales
+│   ├── silver/                            # Datos limpios en Parquet
+│   └── gold/                              # Dataset final, predicciones y SHAP
+│
+├── models/                                # Modelos serializados y versionados
+├── environment/                           # Configuración del entorno
+├── README.md
+├── CONTRIBUTING.md
+└── .gitignore
+```
+
+Los datos de `data/` no se suben al repositorio por su tamaño; se obtienen ejecutando el pipeline o desde el dataset de Hugging Face.
+
+---
 
 ## 📄 Documentación
 
-- [Presentación y viabilidad](docs/NF1_Presentacion_y_Viabilidad.pdf)
-- [Guía de contribución](CONTRIBUTING.md)
+- [NF1 · Presentación y viabilidad](docs/NF1_Presentacion_y_Viabilidad.pdf)
+- [NF2 · Documentación y diseño técnico](docs/NF2_Documentacion_y_Diseno_Tecnico.pdf)
 - [Decisiones de diseño](docs/decisiones.md)
+- [Guía de contribución](CONTRIBUTING.md) (flujo Git, ramas `feat/`, `fix/`, `docs/`, `chore/` y Pull Requests con squash a `main`)
 
-## 📁 Estructura del repositorio
-```
-repo/
-├ docs/ #Documentación del proyecto
-│├ NF1_Presentacion_y_Viabilidad.pdf
-│├ NF2_Documentacion_y_Diseno_Tecnico.pdf
-│├ arquitectura.png
-│└	decisiones.md
-│
-├ src/  #Código fuente
-│├ ingest/
-│├ features/
-│├ ml/
-│├ explainability/
-│└ dashboard/
-│
-│├ data/
-│├ bronze/
-│├ silver/
-│├ gold/
-│└ .gitkeep
-│
-├ models/   #Modelos serializados
-├ enviroment/   #Configuración del entorno
-├ README.md
-├ CONTRIBUTING.md
-└ .gitignore
-```
+---
+
+## ⚖️ Fuentes de datos y licencias
+
+Todas las fuentes son públicas, gratuitas y con datos reales (no se generan datos sintéticos).
+
+| Fuente | Uso en el proyecto | Condiciones y atribución |
+|---|---|---|
+| [AEMET OpenData](https://opendata.aemet.es/centrodedescargas/inicio) | Meteorología diaria por estación | Reutilizable según la nota legal de AEMET (Ley 37/2007, mod. Ley 18/2015). **Fuente: AEMET.** AEMET no respalda este trabajo |
+| [EGIF-MITECO](https://www.miteco.gob.es/es/biodiversidad/temas/incendios-forestales/estadisticas-datos.html) | Histórico de partes de incendio (fuente principal de eventos) | Ley 37/2007 y RD 1495/2011; CC BY 4.0 en datos.gob.es. **Origen de los datos: Ministerio para la Transición Ecológica y el Reto Demográfico** |
+| [EFFIS / Copernicus](https://forest-fire.emergency.copernicus.eu/applications/data-and-services) | FWI y componentes (variable y baseline) | CC BY 4.0 ([licencia](https://forest-fire.emergency.copernicus.eu/about-effis/data-license)). Copernicus Emergency Management Service (JRC); FWI histórico DOI 10.24381/cds.0e89c522 (ECMWF). Los datos se han transformado |
+| [INE](https://www.ine.es/dynt3/metadatos/RespuestaDatos.html?oper=185) | Códigos y nombres oficiales de municipios | **Elaboración propia con datos extraídos del sitio web del INE: www.ine.es** |
+| [CNIG / IGN](https://centrodedescargas.cnig.es/CentroDescargas/index.jsp) | Límites municipales | Licencia compatible con CC BY 4.0 (Orden FOM/2807/2015). **© Instituto Geográfico Nacional** |
+
+El proyecto no trata datos personales: la información se agrega a nivel de municipio y día y solo se conservan los campos necesarios.
