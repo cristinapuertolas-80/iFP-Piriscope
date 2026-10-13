@@ -1,22 +1,79 @@
-#Entornos virtuales
-environment/
+# =============================================================
+# .gitignore - Piriscope (Grupo 6, C088)
+# =============================================================
+
+# --- Datos (no se versionan; viven en Hugging Face datasets) ---
+# Se conserva la estructura de carpetas mediante .gitkeep
+data/*
+!data/bronze/
+!data/silver/
+!data/gold/
+data/bronze/*
+data/silver/*
+data/gold/*
+!data/bronze/.gitkeep
+!data/silver/.gitkeep
+!data/gold/.gitkeep
+
+# --- Excepciones: ficheros de data/ que SI se versionan ---
+# Documentación de la carpeta de datos
+!data/README.md
+# Scripts (.py) sueltos en data/ o en la raíz de cada capa
+!data/*.py
+!data/bronze/*.py
+!data/silver/*.py
+!data/gold/*.py
+# Muestras pequeñas para pruebas (pytest / GitHub Actions)
+!data/sample/
+!data/sample/**
+
+# --- Modelos serializados (se guardan en Hugging Face / models/) ---
+# Si decidís versionar modelos pequeños en el repositorio, borrad estas 2 líneas
+models/*
+!models/.gitkeep
+
+# --- Secretos y credenciales (API key de AEMET, HF_TOKEN...) ---
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+secrets/
+*.secret
+*.key
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
 .venv/
 venv/
-__pycache__/
-*.pyc
-*.pyo
+env/
 
-#Jupyter
+# --- Pruebas y cobertura (pytest) ---
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- Jupyter / análisis exploratorio (EDA) ---
 .ipynb_checkpoints/
 
-#IDEs
+# --- Cachés locales (Hugging Face, Streamlit, etc.) ---
+.cache/
+.huggingface/
+
+# --- Logs y temporales ---
+*.log
+logs/
+tmp/
+*.tmp
+
+# --- Editores y sistema operativo ---
 .vscode/
 .idea/
-
-#Sistema
 .DS_Store
 Thumbs.db
-
-#Variables de entorno
-.env
-*.env
