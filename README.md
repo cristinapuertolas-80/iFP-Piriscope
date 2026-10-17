@@ -6,7 +6,7 @@
 Proyecto del módulo C088 · Proyecto de Inteligencia Artificial y Big Data · Grupo 6
 
 ![Estado](https://img.shields.io/badge/Estado-En%20desarrollo-orange)
-![Fase](https://img.shields.io/badge/Fase-2%20·%20Diseño%20técnico-lightgrey)
+![Fase](https://img.shields.io/badge/Fase-3%20·%20Ingesta%20de%20datos-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.x-blue)
 
 ---
@@ -73,7 +73,7 @@ Más detalle en la [documentación y diseño técnico](docs/NF2_Documentacion_y_
 
 ## ▶️ Cómo ejecutar
 
-> 🚧 **El proyecto está en fase de diseño.** Los comandos de esta sección describen el funcionamiento previsto; los pasos marcados con ⏳ aún no están implementados.
+> 🚧 **El proyecto está en desarrollo.** La **ingesta de datos** ya está implementada ([`src/ingest`](src/ingest/README.md)); los pasos marcados con ⏳ aún no lo están.
 
 ### 1. Requisitos previos
 
@@ -90,32 +90,48 @@ cd iFP-Piriscope
 python -m venv .venv
 source .venv/bin/activate          # En Windows: .venv\Scripts\activate
 
-pip install -r environment/requirements.txt   # ⏳
+pip install -r environment/requirements.txt
 ```
 
 ### 3. Configurar las credenciales
 
-Crea un fichero `.env` en la raíz del proyecto (está excluido en `.gitignore`, **nunca lo subas**):
+Copia `.env.example` como `.env` en la raíz del proyecto (está excluido en `.gitignore`, **nunca lo subas**) y rellénalo:
 
 ```env
 AEMET_API_KEY=tu_api_key_de_aemet
+CDSAPI_KEY=tu_clave_del_early_warning_data_store   # FWI de EFFIS/Copernicus
 HF_TOKEN=tu_token_de_hugging_face
 ```
 
-### 4. Ejecutar el pipeline de datos y el modelo ⏳
+### 4. Ingesta de datos
+
+```bash
+# Cada fuente por separado (detalle en src/ingest/README.md)
+python -m src.ingest aemet --desde 2020-01-01 --hasta 2024-12-31
+python -m src.ingest effis --desde 2020-01-01 --hasta 2024-12-31
+python -m src.ingest egif          # exportaciones de EGIF en data/landing/egif/
+python -m src.ingest ine_cnig      # límites del CNIG en data/landing/ine_cnig/
+
+# O todas desde el orquestador, subiendo los originales a Hugging Face
+python run_pipeline.py --desde 2020-01-01 --hasta 2024-12-31 --etapas ingesta --subir-hf
+```
+
+La ingesta automática diaria (AEMET) y mensual (FWI) la ejecuta el workflow [`.github/workflows/ingesta.yml`](.github/workflows/ingesta.yml), que necesita los Secrets `AEMET_API_KEY`, `HF_TOKEN` y, para el FWI, `CDSAPI_KEY`.
+
+### 5. Ejecutar el resto del pipeline y el modelo ⏳
 
 ```bash
 # Ingesta → Silver → Gold → entrenamiento/inferencia para un rango de fechas
 python run_pipeline.py --desde 2020-01-01 --hasta 2024-12-31
 ```
 
-### 5. Lanzar el dashboard ⏳
+### 6. Lanzar el dashboard ⏳
 
 ```bash
 streamlit run src/dashboard/app.py
 ```
 
-### 6. Ejecutar los tests ⏳
+### 7. Ejecutar los tests
 
 ```bash
 pytest

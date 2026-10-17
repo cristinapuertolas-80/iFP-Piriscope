@@ -39,6 +39,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 | [DEC-27](#dec-27-datos-personales-y-licencias) | Datos personales y licencias | Ética / Legal | Aceptada |
 | [DEC-28](#dec-28-criterios-de-accesibilidad-del-dashboard) | Accesibilidad del dashboard | Ética / UX | Aceptada |
 | [DEC-29](#dec-29-control-de-alcance-y-punto-de-control-s5s6) | Control de alcance y punto de control | Proceso | Aceptada |
+| [DEC-30](#dec-30-diseño-de-la-ingesta-en-bronze) | Diseño de la ingesta en Bronze | Datos / Arquitectura | Aceptada |
 
 ---
 
@@ -292,6 +293,22 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 - **Fecha:** NF2 · **Estado:** Aceptada
 - **Decisión:** el núcleo del proyecto es **EGIF + AEMET + FWI**. Vegetación/NDVI, terreno, bases de datos, PySpark, nuevas fuentes y la automatización completa son **opcionales**. En las semanas 5–6 hay un **punto de control**: si el cruce de datos no está validado, se recorta a las funcionalidades mínimas.
 
+### DEC-30. Diseño de la ingesta en Bronze
+
+- **Fecha:** 2026-10-17 · **Estado:** Aceptada
+- **Responsable:** Cristina (ingesta) · **Issue/PR:** feat/ingesta-datos
+- **Contexto:** HU-01, HU-02 y HU-03 piden descargar o incorporar AEMET, EGIF y FWI de forma reproducible, con reintentos, caché, trazabilidad y archivo en Hugging Face.
+- **Decisión:**
+  - Módulo `src/ingest` con una función `ingestar()` por fuente y CLI `python -m src.ingest <fuente>`; `run_pipeline.py --etapas ingesta` las encadena.
+  - Cada ejecución crea `data/bronze/<fuente>/<AAAAMMDDTHHMMSSZ>/` con los ficheros **tal como llegan** y un `manifest.json` (parámetros, bytes, SHA-256 y origen de cada fichero, incidencias, atribución y commit del código). Se sube a Hugging Face en `raw/<FUENTE>/<timestamp>/` (apartado 5.3).
+  - **AEMET:** una petición por estación gallega y tramo de ≤ 180 días (límite de 6 meses de la API), pausa entre peticiones y espera ante `429`. Los tramos con más de 30 días de antigüedad se reutilizan de ejecuciones previas (caché) para descargar el histórico una sola vez. Se genera `cobertura_estaciones.csv`.
+  - **EGIF:** sin API; se ingieren las exportaciones Excel del buscador público dejadas en `data/landing/egif/`. Además de copiar los originales, se genera `egif_galicia_unificado.parquet` (cuatro provincias, columnas normalizadas, sin duplicados, `id_evento`), informe de duplicados y recuentos por provincia y año, contrastables con `docs/egif_estadisticas_oficiales.csv`. El tipado y el código INE se dejan para Silver.
+  - **FWI:** dataset `cems-fire-historical-v1` del Early Warning Data Store vía `cdsapi`, un fichero NetCDF por mes recortado a la caja de Galicia (si el servidor rechaza el recorte, se descarga sin él y se anota).
+  - **INE/CNIG:** el diccionario de municipios del INE se descarga automáticamente; los límites del CNIG se incorporan a mano desde `data/landing/ine_cnig/` porque su descarga exige aceptar la licencia en la web.
+  - **Ingesta automática:** workflow `ingesta.yml` diario para AEMET (últimos 10 días, por el retraso de publicación) y mensual para el FWI (mes anterior, `intermediate_dataset`).
+- **Alternativas descartadas:** petición `todasestaciones` de AEMET (descarga toda España y obliga a filtrar después); scraping del buscador de EGIF (frágil y sin API estable).
+- **Consecuencias:** la caché local no existe en GitHub Actions, por lo que el cron sólo pide días recientes; el histórico se carga una vez en local y se sube con `--subir-hf`. **Pendiente de verificar con datos reales:** nombres exactos de columna de las exportaciones de EGIF (ampliar `MAPEO_COLUMNAS` si hace falta) y que el EWDS acepte el recorte `area`.
+
 ---
 
 ## Decisiones pendientes
@@ -304,7 +321,7 @@ Se cerrarán durante la adquisición y el EDA y se registrarán como nuevas entr
 - [ ] Medidas diarias de temperatura, humedad y viento (media, máxima, mínima…).
 - [ ] Método de imputación de datos meteorológicos faltantes.
 - [ ] Umbral de "precipitación relevante" para `racha_dias_secos`.
-- [ ] Formato definitivo de `id_evento` (¿se repite el número de parte entre provincias?) (DEC-14).
+- [ ] Formato definitivo de `id_evento` (¿se repite el número de parte entre provincias?) (DEC-14). La ingesta de EGIF lo detecta automáticamente y lo registra en `mapeo_columnas.json` (DEC-30).
 - [ ] Umbrales de los niveles bajo / medio / alto (DEC-04).
 - [ ] Modelo final (XGBoost o Random Forest), hiperparámetros y estrategia de balanceo (DEC-17, DEC-24).
 

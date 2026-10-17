@@ -1,0 +1,129 @@
+# Ingesta automática de las fuentes y archivo de los originales en Hugging Face
+# (apartados 5.3 y 5.8 del diseño técnico). Sólo cubre la descarga: Silver, Gold
+# y el modelo se ejecutan aparte con run_pipeline.py.
+#
+# Secrets necesarios (Settings → Secrets and variables → Actions):
+#   AEMET_API_KEY  API key de AEMET OpenData
+#   HF_TOKEN       token fine-grained con escritura SOLO sobre el dataset
+#   CDSAPI_KEY     (opcional) clave del Early Warning Data Store para el FWI
+# Variable opcional: HF_REPO_ID (por defecto cpuertolas/piriscope)
+
+name: Ingesta automática
+
+on:
+  schedule:
+    # AEMET a diario (06:17 hora peninsular en verano). Se piden los últimos 10
+    # días porque los valores climatológicos diarios se publican con retraso.
+    - cron: "17 4 * * *"
+    # FWI una vez al mes (día 6): mes anterior, dataset intermedio.
+    - cron: "41 4 6 * *"
+  workflow_dispatch:
+    inputs:
+      fuente:
+        description: "Fuente a ingerir"
+        type: choice
+        options: [aemet, effis, ine_cnig]
+        default: aemet
+      desde:
+        description: "Fecha inicial AAAA-MM-DD (vacío = usar 'dias')"
+        required: false
+      hasta:
+        description: "Fecha final AAAA-MM-DD (vacío = ayer)"
+        required: false
+      dias:
+        description: "Últimos N días hasta ayer (si no se indica 'desde')"
+        required: false
+        default: "10"
+
+concurrency:
+  group: ingesta-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  HF_REPO_ID: ${{ vars.HF_REPO_ID || 'cpuertolas/piriscope' }}
+  HAY_CDSAPI_KEY: ${{ secrets.CDSAPI_KEY != '' }}
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  ingesta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: environment/requirements.txt
+
+      - name: Instalar dependencias
+        run: pip install -r environment/requirements.txt
+
+      - name: Decidir qué ingerir
+        id: plan
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            FUENTE="${{ inputs.fuente }}"
+            if [ -n "${{ inputs.desde }}" ]; then
+              RANGO="--desde ${{ inputs.desde }}"
+              [ -n "${{ inputs.hasta }}" ] && RANGO="$RANGO --hasta ${{ inputs.hasta }}"
+            else
+              RANGO="--dias ${{ inputs.dias }}"
+            fi
+          elif [ "${{ github.event.schedule }}" = "41 4 6 * *" ]; then
+            FUENTE="effis"
+            DESDE=$(date -u -d "$(date -u +%Y-%m-01) -1 month" +%Y-%m-%d)
+            HASTA=$(date -u -d "$(date -u +%Y-%m-01) -1 day" +%Y-%m-%d)
+            RANGO="--desde $DESDE --hasta $HASTA"
+            echo "EFFIS_DATASET_TYPE=intermediate_dataset" >> "$GITHUB_ENV"
+          else
+            FUENTE="aemet"
+            RANGO="--dias 10"
+          fi
+          [ "$FUENTE" = "ine_cnig" ] && RANGO=""
+          echo "fuente=$FUENTE" >> "$GITHUB_OUTPUT"
+          echo "rango=$RANGO" >> "$GITHUB_OUTPUT"
+          echo "Fuente: $FUENTE | Rango: $RANGO"
+
+      - name: Ingerir y subir a Hugging Face
+        if: steps.plan.outputs.fuente != 'effis' || env.HAY_CDSAPI_KEY == 'true'
+        env:
+          AEMET_API_KEY: ${{ secrets.AEMET_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          CDSAPI_URL: https://ewds.climate.copernicus.eu/api
+          CDSAPI_KEY: ${{ secrets.CDSAPI_KEY }}
+        run: |
+          python -m src.ingest ${{ steps.plan.outputs.fuente }} ${{ steps.plan.outputs.rango }} --subir-hf
+
+      - name: Resumen
+        if: always()
+        run: |
+          for m in data/bronze/*/*/manifest.json; do
+            [ -f "$m" ] || continue
+            python - "$m" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json, sys
+          m = json.load(open(sys.argv[1], encoding="utf-8"))
+          print(f"### {m['fuente_hf']} · {m['timestamp_ingesta']}")
+          print(f"- Estado: **{m['estado']}**")
+          print(f"- Ficheros: {m['n_ficheros']} ({m['bytes_totales'] / 1e6:.1f} MB)")
+          print(f"- Reutilizados de caché: {len(m.get('reutilizados_de_cache', []))}")
+          print(f"- Incidencias: {len(m['incidencias'])}")
+          for i in m["incidencias"][:20]:
+              print(f"  - `{i['tipo']}`: {i['detalle']}")
+          PY
+          done
+
+      - name: Guardar informes de la ejecución
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: informes-ingesta-${{ github.run_id }}
+          path: |
+            data/bronze/*/*/manifest.json
+            data/bronze/*/*/*.csv
+          if-no-files-found: ignore
+          retention-days: 30

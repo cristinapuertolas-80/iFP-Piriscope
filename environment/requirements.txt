@@ -1,0 +1,15 @@
+# Entorno de Piriscope (Python >= 3.10)
+# Instalación: pip install -r environment/requirements.txt
+
+# --- Ingesta y procesamiento ---
+pandas>=2.1
+pyarrow>=14
+requests>=2.31
+python-dotenv>=1.0
+openpyxl>=3.1        # exportaciones .xlsx de EGIF
+xlrd>=2.0            # exportaciones .xls antiguas de EGIF
+cdsapi>=0.7.2        # FWI de EFFIS/Copernicus (Early Warning Data Store)
+huggingface_hub>=0.24
+
+# --- Pruebas ---
+pytest>=8
