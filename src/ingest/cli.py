@@ -42,21 +42,31 @@ def _fecha(texto: str) -> date:
 
 
 def resolver_rango(desde: date | None, hasta: date | None, dias: int | None,
-                   hoy: date | None = None) -> tuple[date, date]:
-    """``--dias N`` = los N días que terminan ayer. Si no, ``--desde``/``--hasta``."""
+                   hoy: date | None = None, retraso: int = 0) -> tuple[date, date]:
+    """``--dias N`` = los N días que terminan ayer (o ``retraso`` días antes de ayer).
+
+    Si no se usa ``--dias``, el rango es ``--desde``/``--hasta`` y, si falta
+    ``--hasta``, termina en el mismo día (ayer menos ``retraso``).
+    """
     hoy = hoy or date.today()
+    ultimo = hoy - timedelta(days=1 + max(retraso, 0))
     if dias:
-        fin = hasta or hoy - timedelta(days=1)
+        fin = hasta or ultimo
         return fin - timedelta(days=dias - 1), fin
     if desde is None:
         raise SystemExit("Indica --desde (y opcionalmente --hasta) o --dias")
-    return desde, hasta or hoy - timedelta(days=1)
+    fin = hasta or ultimo
+    if fin < desde:
+        raise SystemExit(f"Rango vacío: {desde} > {fin}")
+    return desde, fin
 
 
-def _anadir_rango(p: argparse.ArgumentParser) -> None:
+def _anadir_rango(p: argparse.ArgumentParser, retraso: int = 0) -> None:
     p.add_argument("--desde", type=_fecha, help="Fecha inicial AAAA-MM-DD (incluida)")
-    p.add_argument("--hasta", type=_fecha, help="Fecha final AAAA-MM-DD (incluida; por defecto ayer)")
-    p.add_argument("--dias", type=int, help="Alternativa: los últimos N días hasta ayer")
+    p.add_argument("--hasta", type=_fecha, help="Fecha final AAAA-MM-DD (incluida; por defecto ayer - retraso)")
+    p.add_argument("--dias", type=int, help="Alternativa: los últimos N días disponibles")
+    p.add_argument("--retraso", type=int, default=retraso,
+                   help=f"Días de retraso de publicación de la fuente (por defecto {retraso})")
 
 
 def construir_parser() -> argparse.ArgumentParser:
@@ -77,8 +87,11 @@ def construir_parser() -> argparse.ArgumentParser:
     p.add_argument("--subir-hf", action="store_true")
 
     p = sub.add_parser("effis", help="FWI y componentes de EFFIS/Copernicus (EWDS)")
-    _anadir_rango(p)
+    # ERA5 (y por tanto el FWI) se publica ~5 días por detrás del tiempo real
+    _anadir_rango(p, retraso=5)
     p.add_argument("--sin-recorte", action="store_true", help="No recortar a la caja de Galicia")
+    p.add_argument("--solo-consolidado", action="store_true",
+                   help="No recurrir al dataset intermedio si un mes no está consolidado")
     p.add_argument("--forzar", action="store_true")
     p.add_argument("--subir-hf", action="store_true")
 
@@ -106,15 +119,16 @@ def ejecutar(args: argparse.Namespace) -> int:
     run = None
     if args.fuente == "aemet":
         from . import aemet
-        desde, hasta = resolver_rango(args.desde, args.hasta, args.dias)
+        desde, hasta = resolver_rango(args.desde, args.hasta, args.dias, retraso=args.retraso)
         run = aemet.ingestar(desde, hasta, estaciones=args.estaciones, forzar=args.forzar)
     elif args.fuente == "egif":
         from . import egif
         run = egif.ingestar(ficheros=args.ficheros, urls=args.urls)
     elif args.fuente == "effis":
         from . import effis
-        desde, hasta = resolver_rango(args.desde, args.hasta, args.dias)
-        run = effis.ingestar(desde, hasta, recortar=not args.sin_recorte, forzar=args.forzar)
+        desde, hasta = resolver_rango(args.desde, args.hasta, args.dias, retraso=args.retraso)
+        run = effis.ingestar(desde, hasta, recortar=not args.sin_recorte, forzar=args.forzar,
+                             alternativa_intermedia=not args.solo_consolidado)
     elif args.fuente == "ine_cnig":
         from . import ine_cnig
         run = ine_cnig.ingestar(anio=args.anio, ficheros=args.ficheros, urls=args.urls, sin_ine=args.sin_ine)

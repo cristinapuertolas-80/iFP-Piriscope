@@ -57,3 +57,45 @@ def test_meses_completos_se_reutilizan_de_cache(bronze):
     run = effis.ingestar(date(2020, 1, 1), date(2020, 2, 29), base_dir=bronze, descargar=desc)
     assert desc.peticiones == []
     assert len(run.reutilizados) == 2
+
+
+class DescargaConsolidadoHasta:
+    """Simula el EWDS: el consolidado sólo existe hasta (anio, mes) incluido."""
+
+    def __init__(self, ultimo_consolidado):
+        self.ultimo = ultimo_consolidado
+        self.peticiones = []
+
+    def __call__(self, dataset, peticion, destino):
+        self.peticiones.append(dict(peticion))
+        mes = (int(peticion["year"][0]), int(peticion["month"][0]))
+        if peticion["dataset_type"] == "consolidated_dataset" and mes > self.ultimo:
+            raise RuntimeError("no data available for the requested period")
+        Path(destino).write_bytes(b"CDF\x01")
+
+
+def test_meses_no_consolidados_usan_dataset_intermedio(bronze):
+    desc = DescargaConsolidadoHasta((2026, 6))
+    run = effis.ingestar(date(2026, 5, 1), date(2026, 8, 10), base_dir=bronze, descargar=desc)
+    ficheros = sorted(p.name for p in run.dir.glob("fwi_*"))
+    assert ficheros == ["fwi_2026_05.nc", "fwi_2026_06.nc",
+                        "fwi_2026_07_intermedio.nc", "fwi_2026_08_intermedio.nc"]
+    assert sum(i["tipo"] == "usa_intermedio" for i in run.incidencias) == 2
+    assert not any(i["tipo"] == "error_descarga" for i in run.incidencias)
+
+
+def test_mes_intermedio_se_sustituye_cuando_ya_esta_consolidado(bronze):
+    effis.ingestar(date(2026, 7, 1), date(2026, 7, 31), base_dir=bronze,
+                   descargar=DescargaConsolidadoHasta((2026, 6)))
+    # Más adelante julio ya está consolidado: la caché no lo da por descargado
+    desc = DescargaConsolidadoHasta((2026, 7))
+    run = effis.ingestar(date(2026, 7, 1), date(2026, 7, 31), base_dir=bronze, descargar=desc)
+    assert (run.dir / "fwi_2026_07.nc").exists()
+    assert desc.peticiones[0]["dataset_type"] == "consolidated_dataset"
+
+
+def test_solo_consolidado_no_recurre_al_intermedio(bronze):
+    run = effis.ingestar(date(2026, 7, 1), date(2026, 7, 31), base_dir=bronze,
+                         descargar=DescargaConsolidadoHasta((2026, 6)), alternativa_intermedia=False)
+    assert not list(run.dir.glob("fwi_*"))
+    assert any(i["tipo"] == "error_descarga" for i in run.incidencias)

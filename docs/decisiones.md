@@ -40,6 +40,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 | [DEC-28](#dec-28-criterios-de-accesibilidad-del-dashboard) | Accesibilidad del dashboard | Ética / UX | Aceptada |
 | [DEC-29](#dec-29-control-de-alcance-y-punto-de-control-s5s6) | Control de alcance y punto de control | Proceso | Aceptada |
 | [DEC-30](#dec-30-diseño-de-la-ingesta-en-bronze) | Diseño de la ingesta en Bronze | Datos / Arquitectura | Aceptada |
+| [DEC-31](#dec-31-periodo-y-frecuencias-de-ingesta) | Periodo y frecuencias de ingesta | Datos / Proceso | Aceptada (periodo pendiente del EDA) |
 
 ---
 
@@ -309,13 +310,26 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 - **Alternativas descartadas:** petición `todasestaciones` de AEMET (descarga toda España y obliga a filtrar después); scraping del buscador de EGIF (frágil y sin API estable).
 - **Consecuencias:** la caché local no existe en GitHub Actions, por lo que el cron sólo pide días recientes; el histórico se carga una vez en local y se sube con `--subir-hf`. **Pendiente de verificar con datos reales:** nombres exactos de columna de las exportaciones de EGIF (ampliar `MAPEO_COLUMNAS` si hace falta) y que el EWDS acepte el recorte `area`.
 
+### DEC-31. Periodo y frecuencias de ingesta
+
+- **Fecha:** 2026-10-18 · **Estado:** Aceptada (periodo pendiente del EDA)
+- **Responsable:** Cristina (ingesta) · **Issue/PR:** feat/plan-ingesta
+- **Contexto:** hay que fijar desde cuándo se cargan los datos y cada cuánto se actualiza cada fuente.
+- **Decisión:**
+  - **Carga inicial 2001–actualidad** para AEMET y FWI; EGIF, todo lo disponible (mínimo 2001). Se carga ancho y el periodo común se recorta en el EDA, porque EGIF sólo tiene años definitivos hasta 2021.
+  - **AEMET diaria** (últimos 10 días, por el retraso de publicación). **FWI semanal** (últimos 14 días disponibles, con 5 días de retraso por ERA5). **EGIF anual**, con una recarga en S7. **INE anual**. **CNIG una vez**.
+  - El FWI se pide al `consolidated_dataset` y, para los meses aún no consolidados, se recurre al `intermediate_dataset` (`fwi_AAAA_MM_intermedio.nc`). En Silver prevalece el consolidado.
+  - Carga inicial por años completos con `scripts/carga_inicial.sh` / `.ps1`, reanudable gracias a la caché de Bronze.
+- **Alternativas descartadas:** FWI diario (los últimos días aún no existen en ERA5); carga inicial desde GitHub Actions (el workflow se corta a las 2 horas y no conserva la caché).
+- **Consecuencias:** procedimiento detallado en [plan_ingesta.md](plan_ingesta.md). **Pendiente:** registrar el periodo común real tras la carga inicial y cerrar DEC-21.
+
 ---
 
 ## Decisiones pendientes
 
 Se cerrarán durante la adquisición y el EDA y se registrarán como nuevas entradas o actualizando las existentes:
 
-- [ ] Periodo común disponible de AEMET, EGIF-MITECO y FWI, y volumen definitivo del dataset.
+- [ ] Periodo común disponible de AEMET, EGIF-MITECO y FWI, y volumen definitivo del dataset (carga 2001–actualidad, DEC-31).
 - [ ] División concreta de años de la partición temporal (DEC-21).
 - [ ] Lista de municipios reservados y criterio de bloque usado: comarca o estación (DEC-22).
 - [ ] Medidas diarias de temperatura, humedad y viento (media, máxima, mínima…).

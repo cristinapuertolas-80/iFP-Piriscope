@@ -1,6 +1,7 @@
 # Ingesta automática de las fuentes y archivo de los originales en Hugging Face
 # (apartados 5.3 y 5.8 del diseño técnico). Sólo cubre la descarga: Silver, Gold
 # y el modelo se ejecutan aparte con run_pipeline.py.
+# Frecuencias y carga inicial: docs/plan_ingesta.md
 #
 # Secrets necesarios (Settings → Secrets and variables → Actions):
 #   AEMET_API_KEY  API key de AEMET OpenData
@@ -15,8 +16,9 @@ on:
     # AEMET a diario (06:17 hora peninsular en verano). Se piden los últimos 10
     # días porque los valores climatológicos diarios se publican con retraso.
     - cron: "17 4 * * *"
-    # FWI una vez al mes (día 6): mes anterior, dataset intermedio.
-    - cron: "41 4 6 * *"
+    # FWI cada lunes: últimos 14 días disponibles (ERA5 llega ~5 días tarde).
+    # Los meses aún no consolidados se descargan del dataset intermedio.
+    - cron: "41 4 * * 1"
   workflow_dispatch:
     inputs:
       fuente:
@@ -74,12 +76,9 @@ jobs:
             else
               RANGO="--dias ${{ inputs.dias }}"
             fi
-          elif [ "${{ github.event.schedule }}" = "41 4 6 * *" ]; then
+          elif [ "${{ github.event.schedule }}" = "41 4 * * 1" ]; then
             FUENTE="effis"
-            DESDE=$(date -u -d "$(date -u +%Y-%m-01) -1 month" +%Y-%m-%d)
-            HASTA=$(date -u -d "$(date -u +%Y-%m-01) -1 day" +%Y-%m-%d)
-            RANGO="--desde $DESDE --hasta $HASTA"
-            echo "EFFIS_DATASET_TYPE=intermediate_dataset" >> "$GITHUB_ENV"
+            RANGO="--dias 14"
           else
             FUENTE="aemet"
             RANGO="--dias 10"

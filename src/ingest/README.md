@@ -18,6 +18,8 @@ cp .env.example .env      # y rellena AEMET_API_KEY, CDSAPI_KEY, HF_TOKEN
 
 ## Uso
 
+Periodos, frecuencias y carga inicial completa: [docs/plan_ingesta.md](../../docs/plan_ingesta.md) y `scripts/carga_inicial.sh` / `.ps1`.
+
 ```bash
 python -m src.ingest --help
 
@@ -68,7 +70,7 @@ data/bronze/ine_cnig/<timestamp>/{ine,cnig}/...
 
 - **AEMET**: protocolo en dos pasos (petición → URL de `datos`), tramos de ≤ 180 días (AEMET limita a 6 meses), pausa entre peticiones, espera y reintento ante `429`, `404` tratado como "sin datos". Los tramos con más de 30 días de antigüedad que ya estén en una ejecución previa de Bronze **no se vuelven a pedir** (caché); `--forzar` lo desactiva.
 - **EGIF**: detecta la fila de cabecera aunque la exportación traiga títulos, normaliza los nombres de columna y los mapea a los del Anexo A cuando los reconoce. Quita partes duplicados (misma campaña, provincia y nº) y comprueba si el nº de parte se repite entre provincias: si ocurre, `id_evento = campaña_provincia_número`; si no, `campaña_número` (DEC-14).
-- **EFFIS**: pide la caja de Galicia; si el servidor rechaza el recorte, lo reintenta sin él y lo anota como incidencia. Los meses completos ya descargados se reutilizan.
+- **EFFIS**: pide la caja de Galicia; si el servidor rechaza el recorte, lo reintenta sin él y lo anota como incidencia. Por defecto termina 5 días antes de ayer (`--retraso 5`, por el retraso de ERA5). Si un mes aún no está en el dataset consolidado, se descarga del intermedio como `fwi_AAAA_MM_intermedio.nc` (desactivable con `--solo-consolidado`); en las ejecuciones siguientes se vuelve a intentar el consolidado. Los meses completos consolidados ya descargados se reutilizan.
 - **Hugging Face**: cada carpeta de ejecución se sube a `raw/<FUENTE>/<timestamp>/` y queda marcada con `.subido_hf`.
 - Una fuente que falla no detiene a las demás en `run_pipeline.py`; todas las incidencias quedan en el manifiesto.
 

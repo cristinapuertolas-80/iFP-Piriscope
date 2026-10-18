@@ -60,8 +60,16 @@ def extension(cfg: config.EffisConfig) -> str:
     return "nc" if cfg.data_format.lower().startswith("netcdf") else "grib"
 
 
-def nombre_fichero(anio: int, mes: int, cfg: config.EffisConfig) -> str:
-    return f"fwi_{anio:04d}_{mes:02d}.{extension(cfg)}"
+def nombre_fichero(anio: int, mes: int, cfg: config.EffisConfig, intermedio: bool = False) -> str:
+    """``fwi_AAAA_MM.nc`` (consolidado) o ``fwi_AAAA_MM_intermedio.nc``.
+
+    Los meses descargados del dataset intermedio llevan otro nombre para que la
+    caché no los confunda con los consolidados: en la siguiente ejecución se
+    vuelve a intentar el consolidado y, cuando ya existe, sustituye al intermedio.
+    En Silver, si hay ambos para un mismo mes, prevalece el consolidado.
+    """
+    sufijo = "_intermedio" if intermedio else ""
+    return f"fwi_{anio:04d}_{mes:02d}{sufijo}.{extension(cfg)}"
 
 
 def _cliente_cdsapi(cfg: config.EffisConfig):
@@ -75,13 +83,34 @@ def _cliente_cdsapi(cfg: config.EffisConfig):
     return cdsapi.Client(**kwargs)
 
 
+def _descargar_mes(descargar: Callable[[str, dict, str], Any], dataset: str, peticion: dict,
+                   destino: Path, run: EjecucionBronze, etiqueta: str) -> dict:
+    """Descarga un mes; si el servidor rechaza el recorte ``area``, reintenta sin él."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_destino = Path(tmp) / destino.name
+        try:
+            descargar(dataset, peticion, str(tmp_destino))
+        except Exception as exc:  # noqa: BLE001
+            if "area" not in peticion:
+                raise
+            run.incidencia("recorte_rechazado", f"{etiqueta}: {exc}. Se reintenta sin 'area'")
+            peticion = {k: v for k, v in peticion.items() if k != "area"}
+            descargar(dataset, peticion, str(tmp_destino))
+        destino.write_bytes(tmp_destino.read_bytes())
+    return peticion
+
+
 def ingestar(desde: date, hasta: date, recortar: bool = True, forzar: bool = False,
              base_dir: Path | None = None, cfg: config.EffisConfig | None = None,
-             descargar: Callable[[str, dict, str], Any] | None = None) -> EjecucionBronze:
+             descargar: Callable[[str, dict, str], Any] | None = None,
+             alternativa_intermedia: bool = True) -> EjecucionBronze:
     """Descarga el FWI y sus componentes, un fichero por mes, para ``[desde, hasta]``.
 
     :param recortar: pide sólo la caja de Galicia. Si el servidor rechaza el
         recorte, se reintenta sin él (el recorte se hará entonces en Silver).
+    :param alternativa_intermedia: si un mes aún no está en el dataset
+        consolidado, se descarga del intermedio (``fwi_AAAA_MM_intermedio.nc``).
+        Así una misma orden sirve para el histórico y para los meses recientes.
     :param descargar: función ``(dataset, peticion, destino)``; por defecto,
         ``cdsapi.Client().retrieve``. Se inyecta en los tests.
     """
@@ -91,12 +120,15 @@ def ingestar(desde: date, hasta: date, recortar: bool = True, forzar: bool = Fal
         descargar = cliente.retrieve
 
     parametros = {"desde": desde.isoformat(), "hasta": hasta.isoformat(), "dataset": cfg.dataset,
-                  "dataset_type": cfg.dataset_type, "variables": list(cfg.variables),
+                  "dataset_type": cfg.dataset_type, "alternativa_intermedia": alternativa_intermedia,
+                  "variables": list(cfg.variables),
                   "area": config.BBOX_GALICIA if recortar else None, "formato": cfg.data_format}
+    usar_alternativa = alternativa_intermedia and cfg.dataset_type == "consolidated_dataset"
 
     with EjecucionBronze("effis", parametros=parametros, base_dir=base_dir) as run:
         for anio, mes in meses_en_rango(desde, hasta):
-            relativa = nombre_fichero(anio, mes, cfg)
+            intermedio_cfg = cfg.dataset_type == "intermediate_dataset"
+            relativa = nombre_fichero(anio, mes, cfg, intermedio=intermedio_cfg)
             completo = (anio, mes) != (hasta.year, hasta.month) or hasta.day == calendar.monthrange(anio, mes)[1]
             if not forzar and completo:
                 cache = buscar_en_cache("effis", relativa, excluir=run.dir, base_dir=base_dir)
@@ -107,25 +139,28 @@ def ingestar(desde: date, hasta: date, recortar: bool = True, forzar: bool = Fal
             d_ini = desde.day if (anio, mes) == (desde.year, desde.month) else 1
             d_fin = hasta.day if (anio, mes) == (hasta.year, hasta.month) else None
             area = config.BBOX_GALICIA if recortar else None
-            destino = run.ruta(relativa)
             peticion = construir_peticion(anio, mes, cfg, area, d_ini, d_fin)
-            log.info("EFFIS %04d-%02d…", anio, mes)
+            etiqueta = f"{anio}-{mes:02d}"
+            log.info("EFFIS %s (%s)…", etiqueta, cfg.dataset_type)
             try:
-                with tempfile.TemporaryDirectory() as tmp:
-                    tmp_destino = Path(tmp) / relativa
-                    try:
-                        descargar(cfg.dataset, peticion, str(tmp_destino))
-                    except Exception as exc:  # noqa: BLE001
-                        if area is None:
-                            raise
-                        run.incidencia("recorte_rechazado",
-                                       f"{anio}-{mes:02d}: {exc}. Se reintenta sin 'area'")
-                        peticion.pop("area", None)
-                        descargar(cfg.dataset, peticion, str(tmp_destino))
-                    destino.write_bytes(tmp_destino.read_bytes())
+                peticion = _descargar_mes(descargar, cfg.dataset, peticion, run.ruta(relativa), run, etiqueta)
             except Exception as exc:  # noqa: BLE001
-                run.incidencia("error_descarga", f"{anio}-{mes:02d}: {exc}")
-                continue
+                run.dir.joinpath(relativa).unlink(missing_ok=True)
+                if not usar_alternativa:
+                    run.incidencia("error_descarga", f"{etiqueta}: {exc}")
+                    continue
+                relativa = nombre_fichero(anio, mes, cfg, intermedio=True)
+                peticion = {**peticion, "dataset_type": "intermediate_dataset"}
+                run.incidencia("usa_intermedio",
+                               f"{etiqueta}: no disponible en consolidated_dataset ({exc}); "
+                               "se descarga intermediate_dataset")
+                try:
+                    peticion = _descargar_mes(descargar, cfg.dataset, peticion, run.ruta(relativa),
+                                              run, etiqueta)
+                except Exception as exc2:  # noqa: BLE001
+                    run.dir.joinpath(relativa).unlink(missing_ok=True)
+                    run.incidencia("error_descarga", f"{etiqueta}: {exc2}")
+                    continue
             run.registrar_existente(relativa, origen=f"ewds:{cfg.dataset}",
                                     anio=anio, mes=mes, peticion=peticion)
     return run
