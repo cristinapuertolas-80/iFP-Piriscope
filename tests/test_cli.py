@@ -27,3 +27,21 @@ def test_parser_aemet():
 def test_parser_subir_solo_una_fuente():
     args = construir_parser().parse_args(["subir", "--solo", "egif"])
     assert args.fuente == "subir" and args.fuente_filtro == "egif"
+
+
+def test_resolver_rango_con_retraso_de_publicacion():
+    # FWI: ~5 días de retraso -> el último día disponible es hoy - 6
+    hoy = date(2026, 10, 18)
+    assert resolver_rango(None, None, 14, hoy=hoy, retraso=5) == (date(2026, 9, 29), date(2026, 10, 12))
+    assert resolver_rango(date(2026, 1, 1), None, None, hoy=hoy, retraso=5) == (date(2026, 1, 1), date(2026, 10, 12))
+
+
+def test_resolver_rango_vacio_falla():
+    with pytest.raises(SystemExit):
+        resolver_rango(date(2026, 10, 15), None, None, hoy=date(2026, 10, 18), retraso=5)
+
+
+def test_parser_effis_retraso_por_defecto():
+    args = construir_parser().parse_args(["effis", "--dias", "14"])
+    assert args.retraso == 5 and not args.solo_consolidado
+    assert construir_parser().parse_args(["aemet", "--dias", "3"]).retraso == 0

@@ -116,7 +116,9 @@ python -m src.ingest ine_cnig      # límites del CNIG en data/landing/ine_cnig/
 python run_pipeline.py --desde 2020-01-01 --hasta 2024-12-31 --etapas ingesta --subir-hf
 ```
 
-La ingesta automática diaria (AEMET) y mensual (FWI) la ejecuta el workflow [`.github/workflows/ingesta.yml`](.github/workflows/ingesta.yml), que necesita los Secrets `AEMET_API_KEY`, `HF_TOKEN` y, para el FWI, `CDSAPI_KEY`.
+**Carga inicial** (histórico 2001–actualidad, una sola vez): `scripts/carga_inicial.sh` o `.\scripts\carga_inicial.ps1`.
+
+La actualización periódica, **diaria para AEMET y semanal para el FWI**, la ejecuta el workflow [`.github/workflows/ingesta.yml`](.github/workflows/ingesta.yml), que necesita los Secrets `AEMET_API_KEY`, `HF_TOKEN` y, para el FWI, `CDSAPI_KEY`. Periodos, frecuencias y procedimiento completo: [docs/plan_ingesta.md](docs/plan_ingesta.md).
 
 ### 5. Ejecutar el resto del pipeline y el modelo ⏳
 
@@ -182,6 +184,7 @@ repo/
 │   └── gold/                              # Dataset final, predicciones y SHAP
 │
 ├── models/                                # Modelos serializados y versionados
+├── scripts/                               # Carga inicial de datos (.sh y .ps1)
 ├── environment/                           # Configuración del entorno
 ├── README.md
 ├── CONTRIBUTING.md
@@ -196,6 +199,7 @@ Los datos de `data/` no se suben al repositorio por su tamaño; se obtienen ejec
 
 - [NF1 · Presentación y viabilidad](docs/NF1_Presentacion_y_Viabilidad.pdf)
 - [NF2 · Documentación y diseño técnico](docs/NF2_Documentacion_y_Diseno_Tecnico.pdf)
+- [Plan de ingesta de datos](docs/plan_ingesta.md)
 - [Decisiones de diseño](docs/decisiones.md)
 - [Guía de contribución](CONTRIBUTING.md) (flujo Git, ramas `feat/`, `fix/`, `docs/`, `chore/` y Pull Requests con squash a `main`)
 
