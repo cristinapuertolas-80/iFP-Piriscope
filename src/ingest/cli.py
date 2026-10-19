@@ -29,7 +29,11 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
-from .common import configurar_logging
+from .common import ErrorRed, configurar_logging
+
+#: Código de salida cuando falla la conexión (certificados, DNS, proxy). Los
+#: scripts de carga se detienen al recibirlo en lugar de seguir con otros años.
+CODIGO_ERROR_RED = 3
 
 log = logging.getLogger("piriscope.ingest")
 
@@ -155,6 +159,9 @@ def main(argv: list[str] | None = None) -> int:
     configurar_logging(logging.DEBUG if args.verbose else logging.INFO)
     try:
         return ejecutar(args)
+    except ErrorRed as exc:
+        log.error("%s", exc)
+        return CODIGO_ERROR_RED
     except (RuntimeError, FileNotFoundError, ValueError) as exc:
         log.error("%s", exc)
         return 2

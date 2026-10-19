@@ -152,6 +152,7 @@ Si el cron ya está funcionando, **no hace falta lanzar nada en local** para AEM
 
 | Síntoma | Causa probable | Qué hacer |
 |---|---|---|
+| `CERTIFICATE_VERIFY_FAILED` / `self signed certificate in certificate chain` (el script se detiene con «FALLO DE CONEXIÓN») | El antivirus (análisis HTTPS) o la red del centro/empresa interceptan las conexiones y Python no reconoce su certificado | Ver [6.1](#61-error-de-certificado-certificate_verify_failed) |
 | `Falta la API key de AEMET` | `.env` o secret sin `AEMET_API_KEY` | Revisar nombre y valor |
 | `API key de AEMET no válida (401)` | Clave incorrecta o caducada | Solicitar una nueva en AEMET OpenData |
 | Muchos `AEMET 429` en el log | Límite de peticiones por minuto | Nada: el código espera y reintenta. Si persiste, subir `AEMET_PAUSA_SEGUNDOS` en `.env` |
@@ -160,6 +161,28 @@ Si el cron ya está funcionando, **no hace falta lanzar nada en local** para AEM
 | EGIF: `columnas_no_reconocidas` | La exportación usa otros nombres de columna | Ampliar `MAPEO_COLUMNAS` en `src/ingest/egif.py` |
 | EGIF: `provincia_ausente` | Falta la exportación de alguna provincia | Exportarla y relanzar `egif` |
 | Error 401/403 de Hugging Face | Token sin permiso de escritura o dataset con otro nombre | Revisar `HF_TOKEN` y `HF_REPO_ID` |
+
+### 6.1 Error de certificado (`CERTIFICATE_VERIFY_FAILED`)
+
+No es un fallo de la fuente ni de las claves: Python no confía en el certificado que recibe al conectar. La ingesta se detiene en el primer intento y el script indica «FALLO DE CONEXIÓN».
+
+1. **Comprobar quién emite el certificado.** Abrir https://ewds.climate.copernicus.eu en el navegador → candado → *La conexión es segura* → *Certificado*. Si el emisor es un antivirus (Avast, AVG, Kaspersky, ESET, Bitdefender…) o un proxy (Fortinet, Zscaler, Sophos…), la conexión está siendo interceptada.
+2. **Solución recomendada:** que Python use los certificados del sistema operativo, que ya confían en ese antivirus o proxy. Con el `.venv` activado:
+   ```bash
+   pip install pip-system-certs
+   ```
+   Comprobar:
+   ```bash
+   python -c "import requests; print(requests.get('https://ewds.climate.copernicus.eu/api', timeout=30).status_code)"
+   ```
+   Cualquier código HTTP (200, 404…) significa que el certificado ya se acepta; si vuelve a salir `CERTIFICATE_VERIFY_FAILED`, pasar al punto 3.
+3. **Alternativas:**
+   - Lanzar la carga desde otra red (casa, datos del móvil).
+   - Desactivar el análisis HTTPS del antivirus o añadir una excepción para `ewds.climate.copernicus.eu`, `opendata.aemet.es` y `huggingface.co`.
+   - En una red corporativa, pedir a sistemas el certificado raíz del proxy.
+4. **Relanzar** el script: lo ya descargado se reutiliza.
+
+**No desactivar nunca la verificación de certificados** (`verify=False`, `PYTHONHTTPSVERIFY=0`…): dejaría las claves y los datos expuestos.
 
 ## Fuentes
 

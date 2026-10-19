@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import config
-from .common import EjecucionBronze, buscar_en_cache, meses_en_rango
+from .common import EjecucionBronze, buscar_en_cache, error_red, es_error_red, meses_en_rango
 
 log = logging.getLogger("piriscope.ingest.effis")
 
@@ -91,7 +91,7 @@ def _descargar_mes(descargar: Callable[[str, dict, str], Any], dataset: str, pet
         try:
             descargar(dataset, peticion, str(tmp_destino))
         except Exception as exc:  # noqa: BLE001
-            if "area" not in peticion:
+            if "area" not in peticion or es_error_red(exc):
                 raise
             run.incidencia("recorte_rechazado", f"{etiqueta}: {exc}. Se reintenta sin 'area'")
             peticion = {k: v for k, v in peticion.items() if k != "area"}
@@ -146,6 +146,10 @@ def ingestar(desde: date, hasta: date, recortar: bool = True, forzar: bool = Fal
                 peticion = _descargar_mes(descargar, cfg.dataset, peticion, run.ruta(relativa), run, etiqueta)
             except Exception as exc:  # noqa: BLE001
                 run.dir.joinpath(relativa).unlink(missing_ok=True)
+                if es_error_red(exc):
+                    # Sin conexión no tiene sentido probar otro dataset ni otro mes
+                    run.incidencia("error_red", f"{etiqueta}: {exc}")
+                    raise error_red("EFFIS/EWDS", exc) from exc
                 if not usar_alternativa:
                     run.incidencia("error_descarga", f"{etiqueta}: {exc}")
                     continue
@@ -159,6 +163,9 @@ def ingestar(desde: date, hasta: date, recortar: bool = True, forzar: bool = Fal
                                               run, etiqueta)
                 except Exception as exc2:  # noqa: BLE001
                     run.dir.joinpath(relativa).unlink(missing_ok=True)
+                    if es_error_red(exc2):
+                        run.incidencia("error_red", f"{etiqueta}: {exc2}")
+                        raise error_red("EFFIS/EWDS", exc2) from exc2
                     run.incidencia("error_descarga", f"{etiqueta}: {exc2}")
                     continue
             run.registrar_existente(relativa, origen=f"ewds:{cfg.dataset}",

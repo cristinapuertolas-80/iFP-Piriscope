@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import config
-from .common import ejecuciones_previas
+from .common import ejecuciones_previas, error_red, es_error_red
 
 log = logging.getLogger("piriscope.ingest.hf")
 
@@ -61,14 +61,19 @@ def subir_ejecucion(run_dir: Path, cfg: config.HuggingFaceConfig | None = None, 
                f"{manifiesto.get('n_ficheros', '?')} ficheros ({manifiesto.get('estado', '?')})")
 
     log.info("Subiendo %s -> hf://datasets/%s/%s", run_dir, cfg.repo_id, destino)
-    api.upload_folder(
-        folder_path=str(run_dir),
-        path_in_repo=destino,
-        repo_id=cfg.repo_id,
-        repo_type=cfg.repo_type,
-        commit_message=mensaje,
-        ignore_patterns=[MARCA_SUBIDO],
-    )
+    try:
+        api.upload_folder(
+            folder_path=str(run_dir),
+            path_in_repo=destino,
+            repo_id=cfg.repo_id,
+            repo_type=cfg.repo_type,
+            commit_message=mensaje,
+            ignore_patterns=[MARCA_SUBIDO],
+        )
+    except Exception as exc:  # noqa: BLE001
+        if es_error_red(exc):
+            raise error_red("Hugging Face", exc) from exc
+        raise
     (run_dir / MARCA_SUBIDO).write_text(
         json.dumps({"repo_id": cfg.repo_id, "ruta": destino,
                     "subido_utc": datetime.now(timezone.utc).isoformat()}),

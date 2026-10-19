@@ -47,6 +47,21 @@ Start-Transcript -Path $Log -Append | Out-Null
 
 $Fallos = New-Object System.Collections.Generic.List[string]
 
+function Resumen-Y-Salir {
+    Write-Host ""
+    Write-Host "================================================================"
+    if ($script:Fallos.Count -eq 0) {
+        Write-Host "Carga inicial terminada sin fallos. Revisa las incidencias de cada manifest.json." -ForegroundColor Green
+        Stop-Transcript | Out-Null
+        exit 0
+    }
+    Write-Host ("Terminado con {0} paso(s) fallido(s):" -f $script:Fallos.Count) -ForegroundColor Red
+    $script:Fallos | ForEach-Object { Write-Host "  - $_" }
+    Write-Host "Vuelve a lanzar el script: lo ya descargado se reutiliza."
+    Stop-Transcript | Out-Null
+    exit 1
+}
+
 function Ejecutar([string]$Nombre, [string[]]$Argumentos) {
     Write-Host ""
     Write-Host ("==> [{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $Nombre)
@@ -54,6 +69,11 @@ function Ejecutar([string]$Nombre, [string[]]$Argumentos) {
     & $Py -m src.ingest @Argumentos
     if ($LASTEXITCODE -eq 0) {
         Write-Host "    OK: $Nombre"
+    } elseif ($LASTEXITCODE -eq 3) {
+        Write-Host "    FALLO DE CONEXIÓN: $Nombre. Se detiene la carga: arregla la conexión" -ForegroundColor Red
+        Write-Host "    (ver el mensaje anterior y docs/plan_ingesta.md, apartado 6) y vuelve a lanzar el script." -ForegroundColor Red
+        $script:Fallos.Add("$Nombre (conexión)")
+        Resumen-Y-Salir
     } else {
         Write-Host "    FALLO: $Nombre (código $LASTEXITCODE)" -ForegroundColor Red
         $script:Fallos.Add($Nombre)
@@ -112,15 +132,4 @@ foreach ($Fuente in $Fuentes) {
     }
 }
 
-Write-Host ""
-Write-Host "================================================================"
-if ($Fallos.Count -eq 0) {
-    Write-Host "Carga inicial terminada sin fallos. Revisa las incidencias de cada manifest.json." -ForegroundColor Green
-    Stop-Transcript | Out-Null
-    exit 0
-}
-Write-Host ("Terminado con {0} paso(s) fallido(s):" -f $Fallos.Count) -ForegroundColor Red
-$Fallos | ForEach-Object { Write-Host "  - $_" }
-Write-Host "Vuelve a lanzar el script: lo ya descargado se reutiliza."
-Stop-Transcript | Out-Null
-exit 1
+Resumen-Y-Salir

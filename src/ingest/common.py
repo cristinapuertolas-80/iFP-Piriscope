@@ -30,6 +30,62 @@ FORMATO_TIMESTAMP = "%Y%m%dT%H%M%SZ"
 log = logging.getLogger("piriscope.ingest")
 
 
+AYUDA_SSL = (
+    "Python no confía en el certificado HTTPS recibido. Suele deberse a que el antivirus "
+    "(análisis HTTPS) o la red (proxy corporativo o del centro) interceptan la conexión. "
+    "Soluciones: cambiar de red, o instalar 'pip install pip-system-certs' en el .venv para "
+    "que Python use los certificados de Windows/macOS. Ver docs/plan_ingesta.md, apartado 6. "
+    "No desactives la verificación de certificados."
+)
+AYUDA_RED = (
+    "No se puede conectar con el servidor. Comprueba la conexión a Internet, el proxy y "
+    "el cortafuegos, y vuelve a lanzar la orden (lo ya descargado se reutiliza)."
+)
+
+
+class ErrorRed(RuntimeError):
+    """Fallo de conexión que no se arregla reintentando (certificados, DNS, proxy...).
+
+    Se propaga para detener la ejecución en lugar de repetir la misma petición
+    fallida para cada estación, tramo o mes.
+    """
+
+
+def _cadena_excepciones(exc: BaseException):
+    vistos = set()
+    while exc is not None and id(exc) not in vistos:
+        vistos.add(id(exc))
+        yield exc
+        exc = exc.__cause__ or exc.__context__
+
+
+def es_error_ssl(exc: BaseException) -> bool:
+    import ssl
+
+    for e in _cadena_excepciones(exc):
+        if isinstance(e, (ssl.SSLError, requests.exceptions.SSLError)):
+            return True
+    texto = str(exc)
+    return "CERTIFICATE_VERIFY_FAILED" in texto or "SSLError" in texto
+
+
+def es_error_red(exc: BaseException) -> bool:
+    """True si ``exc`` es un problema de conexión (no de la petición en sí)."""
+    if es_error_ssl(exc):
+        return True
+    for e in _cadena_excepciones(exc):
+        if isinstance(e, (requests.exceptions.ConnectionError, ConnectionError)):
+            return True
+    texto = str(exc)
+    return any(m in texto for m in ("Max retries exceeded", "NameResolutionError",
+                                    "Failed to establish a new connection", "ProxyError"))
+
+
+def error_red(origen: str, exc: BaseException) -> ErrorRed:
+    ayuda = AYUDA_SSL if es_error_ssl(exc) else AYUDA_RED
+    return ErrorRed(f"{origen}: {ayuda}\nDetalle: {exc}")
+
+
 def configurar_logging(nivel: int = logging.INFO) -> None:
     logging.basicConfig(
         level=nivel,
