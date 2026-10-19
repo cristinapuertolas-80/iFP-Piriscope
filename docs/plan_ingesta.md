@@ -157,6 +157,7 @@ Si el cron ya está funcionando, **no hace falta lanzar nada en local** para AEM
 | `API key de AEMET no válida (401)` | Clave incorrecta o caducada | Solicitar una nueva en AEMET OpenData |
 | Muchos `AEMET 429` en el log | Límite de peticiones por minuto | Nada: el código espera y reintenta. Si persiste, subir `AEMET_PAUSA_SEGUNDOS` en `.env` |
 | `error_descarga` en el FWI | Licencia no aceptada, clave incorrecta o mes no disponible | Revisar la licencia en el EWDS y `CDSAPI_KEY`; relanzar |
+| FWI: `Number queued requests for this dataset is temporarly limited` (incidencia `cola_llena`) | El EWDS limita las peticiones en cola por usuario: hay trabajos pendientes de ejecuciones anteriores o dos cargas a la vez | Nada si se resuelve solo: el código espera 2 minutos y reintenta (hasta 15 veces). Si se detiene con «FALLO DE CONEXIÓN»: cancelar las peticiones pendientes en [ewds.climate.copernicus.eu/requests](https://ewds.climate.copernicus.eu/requests), dejar una sola carga en marcha y relanzar |
 | `recorte_rechazado` en el FWI | El servidor no acepta el recorte de Galicia | Nada: se descarga sin recorte y se recorta en Silver |
 | EGIF: `columnas_no_reconocidas` | La exportación usa otros nombres de columna | Ampliar `MAPEO_COLUMNAS` en `src/ingest/egif.py` |
 | EGIF: `provincia_ausente` | Falta la exportación de alguna provincia | Exportarla y relanzar `egif` |

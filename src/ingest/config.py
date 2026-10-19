@@ -105,6 +105,10 @@ class EffisConfig:
     system_version: str = field(default_factory=lambda: _env("EFFIS_SYSTEM_VERSION", "4_1"))
     grid: str = "0.25/0.25"
     data_format: str = field(default_factory=lambda: _env("EFFIS_FORMATO", "netcdf"))
+    #: El EWDS limita las peticiones en cola por usuario ("Number queued requests
+    #: for this dataset is temporarily limited"): se espera y se reintenta.
+    espera_cola_segundos: float = float(_env("EFFIS_ESPERA_COLA", "120"))
+    max_reintentos_cola: int = int(_env("EFFIS_MAX_REINTENTOS_COLA", "15"))
 
 
 @dataclass(frozen=True)

@@ -99,3 +99,58 @@ def test_solo_consolidado_no_recurre_al_intermedio(bronze):
                          descargar=DescargaConsolidadoHasta((2026, 6)), alternativa_intermedia=False)
     assert not list(run.dir.glob("fwi_*"))
     assert any(i["tipo"] == "error_descarga" for i in run.incidencias)
+
+
+MENSAJE_COLA = ("invalid request. Request has not produced a valid combination of values, please check "
+                "your selection. The job has been rejected. Number queued requests for this dataset is "
+                "temporarly limited. Please configure your scripts accordingly.")
+
+
+class DescargaConCola:
+    """Rechaza los primeros ``n`` trabajos por cola llena y después descarga."""
+
+    def __init__(self, n):
+        self.n = n
+        self.peticiones = []
+
+    def __call__(self, dataset, peticion, destino):
+        self.peticiones.append(dict(peticion))
+        if self.n > 0:
+            self.n -= 1
+            raise RuntimeError(MENSAJE_COLA)
+        Path(destino).write_bytes(b"CDF\x01")
+
+
+def test_cola_llena_se_espera_y_no_se_confunde_con_el_recorte(bronze):
+    esperas = []
+    desc = DescargaConCola(3)
+    run = effis.ingestar(date(2001, 1, 1), date(2001, 1, 31), base_dir=bronze, descargar=desc,
+                         cfg=config.EffisConfig(espera_cola_segundos=7), dormir=esperas.append)
+    assert (run.dir / "fwi_2001_01.nc").exists()
+    assert esperas == [7, 7, 7]
+    assert all("area" in p for p in desc.peticiones)  # el recorte se mantiene
+    tipos = [i["tipo"] for i in run.incidencias]
+    assert tipos == ["cola_llena"]
+
+
+def test_cola_llena_persistente_detiene_la_ejecucion(bronze):
+    import json
+
+    import pytest
+
+    desc = DescargaConCola(100)
+    with pytest.raises(effis.ColaEwdsLlena, match="ewds.climate.copernicus.eu/requests"):
+        effis.ingestar(date(2001, 1, 1), date(2001, 3, 31), base_dir=bronze, descargar=desc,
+                       cfg=config.EffisConfig(max_reintentos_cola=4), dormir=lambda s: None)
+    assert len(desc.peticiones) == 4  # ni sin 'area', ni intermedio, ni más meses
+    m = json.loads(next((bronze / "effis").glob("*/manifest.json")).read_text(encoding="utf-8"))
+    assert m["estado"] == "fallida"
+    assert "usa_intermedio" not in [i["tipo"] for i in m["incidencias"]]
+
+
+def test_recorte_rechazado_no_se_reintenta_en_cada_mes(bronze):
+    desc = DescargaFalsa(rechazar_area=True)
+    run = effis.ingestar(date(2001, 1, 1), date(2001, 3, 31), base_dir=bronze, descargar=desc)
+    assert len(list(run.dir.glob("fwi_*"))) == 3
+    assert len(desc.peticiones) == 4  # 1 rechazada con 'area' + 3 sin él
+    assert sum(i["tipo"] == "recorte_rechazado" for i in run.incidencias) == 1
