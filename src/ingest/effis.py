@@ -25,12 +25,13 @@ from __future__ import annotations
 import calendar
 import logging
 import tempfile
+import time
 from datetime import date
 from pathlib import Path
 from typing import Any, Callable
 
 from . import config
-from .common import EjecucionBronze, buscar_en_cache, meses_en_rango
+from .common import EjecucionBronze, ErrorRed, buscar_en_cache, error_red, es_error_red, meses_en_rango
 
 log = logging.getLogger("piriscope.ingest.effis")
 
@@ -83,19 +84,67 @@ def _cliente_cdsapi(cfg: config.EffisConfig):
     return cdsapi.Client(**kwargs)
 
 
+class ColaEwdsLlena(ErrorRed):
+    """El EWDS sigue rechazando trabajos por tener demasiadas peticiones en cola."""
+
+
+def es_limite_cola(exc: BaseException) -> bool:
+    """True si el EWDS rechaza el trabajo por el límite de peticiones en cola.
+
+    El servidor responde con un título genérico («invalid request. Request has not
+    produced a valid combination of values») seguido del motivo real («The job has
+    been rejected. Number queued requests for this dataset is temporarly limited»),
+    así que no debe confundirse con un rechazo del recorte ``area``.
+    """
+    texto = str(exc).lower()
+    return any(m in texto for m in ("queued requests", "temporarly limited", "temporarily limited",
+                                    "too many requests"))
+
+
+def _descargar_con_espera(descargar: Callable[[str, dict, str], Any], dataset: str, peticion: dict,
+                          destino: str, cfg: config.EffisConfig, run: EjecucionBronze, etiqueta: str,
+                          dormir: Callable[[float], Any]) -> None:
+    for intento in range(1, cfg.max_reintentos_cola + 1):
+        try:
+            descargar(dataset, peticion, destino)
+            return
+        except Exception as exc:  # noqa: BLE001
+            if not es_limite_cola(exc):
+                raise
+            if intento == 1:
+                run.incidencia("cola_llena", f"{etiqueta}: el EWDS limita las peticiones en cola; "
+                                             f"se espera {cfg.espera_cola_segundos:.0f} s y se reintenta")
+            log.warning("EWDS: cola llena (%s/%s). Esperando %.0f s…", intento,
+                        cfg.max_reintentos_cola, cfg.espera_cola_segundos)
+            dormir(cfg.espera_cola_segundos)
+    raise ColaEwdsLlena(
+        "EFFIS/EWDS: el servidor sigue rechazando trabajos por tener demasiadas peticiones en cola. "
+        "Cancela las peticiones pendientes en https://ewds.climate.copernicus.eu/requests, comprueba "
+        "que no hay otra carga en marcha y vuelve a lanzar la orden (lo ya descargado se reutiliza)."
+    )
+
+
 def _descargar_mes(descargar: Callable[[str, dict, str], Any], dataset: str, peticion: dict,
-                   destino: Path, run: EjecucionBronze, etiqueta: str) -> dict:
-    """Descarga un mes; si el servidor rechaza el recorte ``area``, reintenta sin él."""
+                   destino: Path, run: EjecucionBronze, etiqueta: str,
+                   cfg: config.EffisConfig | None = None,
+                   dormir: Callable[[float], Any] = time.sleep) -> dict:
+    """Descarga un mes; si el servidor rechaza el recorte ``area``, reintenta sin él.
+
+    Las esperas por cola llena y los errores de red no se confunden con un
+    rechazo del recorte.
+    """
+    cfg = cfg or config.EffisConfig()
     with tempfile.TemporaryDirectory() as tmp:
         tmp_destino = Path(tmp) / destino.name
         try:
-            descargar(dataset, peticion, str(tmp_destino))
+            _descargar_con_espera(descargar, dataset, peticion, str(tmp_destino), cfg, run, etiqueta, dormir)
         except Exception as exc:  # noqa: BLE001
-            if "area" not in peticion:
+            if "area" not in peticion or isinstance(exc, ColaEwdsLlena) or es_error_red(exc):
                 raise
-            run.incidencia("recorte_rechazado", f"{etiqueta}: {exc}. Se reintenta sin 'area'")
+            run.incidencia("recorte_rechazado", f"{etiqueta}: {exc}. Se reintenta sin 'area' "
+                                                "(y sin él el resto de meses de esta ejecución)")
             peticion = {k: v for k, v in peticion.items() if k != "area"}
-            descargar(dataset, peticion, str(tmp_destino))
+            _descargar_con_espera(descargar, dataset, peticion, str(tmp_destino), cfg, run, etiqueta, dormir)
         destino.write_bytes(tmp_destino.read_bytes())
     return peticion
 
@@ -103,7 +152,8 @@ def _descargar_mes(descargar: Callable[[str, dict, str], Any], dataset: str, pet
 def ingestar(desde: date, hasta: date, recortar: bool = True, forzar: bool = False,
              base_dir: Path | None = None, cfg: config.EffisConfig | None = None,
              descargar: Callable[[str, dict, str], Any] | None = None,
-             alternativa_intermedia: bool = True) -> EjecucionBronze:
+             alternativa_intermedia: bool = True,
+             dormir: Callable[[float], Any] = time.sleep) -> EjecucionBronze:
     """Descarga el FWI y sus componentes, un fichero por mes, para ``[desde, hasta]``.
 
     :param recortar: pide sólo la caja de Galicia. Si el servidor rechaza el
@@ -124,6 +174,7 @@ def ingestar(desde: date, hasta: date, recortar: bool = True, forzar: bool = Fal
                   "variables": list(cfg.variables),
                   "area": config.BBOX_GALICIA if recortar else None, "formato": cfg.data_format}
     usar_alternativa = alternativa_intermedia and cfg.dataset_type == "consolidated_dataset"
+    recorte_activo = recortar
 
     with EjecucionBronze("effis", parametros=parametros, base_dir=base_dir) as run:
         for anio, mes in meses_en_rango(desde, hasta):
@@ -138,14 +189,22 @@ def ingestar(desde: date, hasta: date, recortar: bool = True, forzar: bool = Fal
 
             d_ini = desde.day if (anio, mes) == (desde.year, desde.month) else 1
             d_fin = hasta.day if (anio, mes) == (hasta.year, hasta.month) else None
-            area = config.BBOX_GALICIA if recortar else None
+            area = config.BBOX_GALICIA if recorte_activo else None
             peticion = construir_peticion(anio, mes, cfg, area, d_ini, d_fin)
             etiqueta = f"{anio}-{mes:02d}"
             log.info("EFFIS %s (%s)…", etiqueta, cfg.dataset_type)
             try:
-                peticion = _descargar_mes(descargar, cfg.dataset, peticion, run.ruta(relativa), run, etiqueta)
+                peticion = _descargar_mes(descargar, cfg.dataset, peticion, run.ruta(relativa), run,
+                                          etiqueta, cfg, dormir)
             except Exception as exc:  # noqa: BLE001
                 run.dir.joinpath(relativa).unlink(missing_ok=True)
+                if isinstance(exc, ColaEwdsLlena):
+                    run.incidencia("cola_llena", f"{etiqueta}: {exc}")
+                    raise
+                if es_error_red(exc):
+                    # Sin conexión no tiene sentido probar otro dataset ni otro mes
+                    run.incidencia("error_red", f"{etiqueta}: {exc}")
+                    raise error_red("EFFIS/EWDS", exc) from exc
                 if not usar_alternativa:
                     run.incidencia("error_descarga", f"{etiqueta}: {exc}")
                     continue
@@ -156,11 +215,19 @@ def ingestar(desde: date, hasta: date, recortar: bool = True, forzar: bool = Fal
                                "se descarga intermediate_dataset")
                 try:
                     peticion = _descargar_mes(descargar, cfg.dataset, peticion, run.ruta(relativa),
-                                              run, etiqueta)
+                                              run, etiqueta, cfg, dormir)
                 except Exception as exc2:  # noqa: BLE001
                     run.dir.joinpath(relativa).unlink(missing_ok=True)
+                    if isinstance(exc2, ColaEwdsLlena):
+                        run.incidencia("cola_llena", f"{etiqueta}: {exc2}")
+                        raise
+                    if es_error_red(exc2):
+                        run.incidencia("error_red", f"{etiqueta}: {exc2}")
+                        raise error_red("EFFIS/EWDS", exc2) from exc2
                     run.incidencia("error_descarga", f"{etiqueta}: {exc2}")
                     continue
+            if area is not None and "area" not in peticion:
+                recorte_activo = False  # el servidor no acepta el recorte: no se vuelve a intentar
             run.registrar_existente(relativa, origen=f"ewds:{cfg.dataset}",
                                     anio=anio, mes=mes, peticion=peticion)
     return run

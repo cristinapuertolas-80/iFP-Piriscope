@@ -45,3 +45,14 @@ def test_parser_effis_retraso_por_defecto():
     args = construir_parser().parse_args(["effis", "--dias", "14"])
     assert args.retraso == 5 and not args.solo_consolidado
     assert construir_parser().parse_args(["aemet", "--dias", "3"]).retraso == 0
+
+
+def test_error_de_conexion_devuelve_codigo_3(monkeypatch):
+    from src.ingest import cli, effis
+    from src.ingest.common import ErrorRed
+
+    def falla(*a, **k):
+        raise ErrorRed("EFFIS/EWDS: certificado")
+
+    monkeypatch.setattr(effis, "ingestar", falla)
+    assert cli.main(["effis", "--desde", "2001-01-01", "--hasta", "2001-01-31"]) == cli.CODIGO_ERROR_RED == 3

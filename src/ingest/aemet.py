@@ -36,7 +36,8 @@ import pandas as pd
 import requests
 
 from . import config
-from .common import EjecucionBronze, buscar_en_cache, crear_sesion, tramos_fechas
+from .common import (EjecucionBronze, buscar_en_cache, crear_sesion, error_red, es_error_ssl,
+                     tramos_fechas)
 
 log = logging.getLogger("piriscope.ingest.aemet")
 
@@ -109,6 +110,9 @@ class ClienteAemet:
             try:
                 r = self.sesion.get(url, timeout=self.cfg.timeout, **kwargs)
             except requests.RequestException as exc:
+                if es_error_ssl(exc):
+                    # Un certificado rechazado no se arregla reintentando
+                    raise error_red("AEMET", exc) from exc
                 log.warning("Error de red (%s/%s) en %s: %s", intento, self.cfg.max_reintentos, url, exc)
                 time.sleep(min(2**intento, 60))
                 continue

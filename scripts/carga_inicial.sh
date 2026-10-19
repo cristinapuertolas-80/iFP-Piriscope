@@ -50,15 +50,35 @@ LOG="logs/carga_inicial_$(date +%Y%m%dT%H%M%S).log"
 exec > >(tee -a "$LOG") 2>&1
 
 FALLOS=()
+resumen_y_salir() {
+  echo ""
+  echo "================================================================"
+  if [ ${#FALLOS[@]} -eq 0 ]; then
+    echo "Carga inicial terminada sin fallos. Revisa las incidencias de cada manifest.json."
+    exit 0
+  fi
+  echo "Terminado con ${#FALLOS[@]} paso(s) fallido(s):"
+  printf '  - %s\n' "${FALLOS[@]}"
+  echo "Vuelve a lanzar el script: lo ya descargado se reutiliza."
+  exit 1
+}
+
 ejecutar() {
   local nombre="$1"; shift
   echo ""
   echo "==> [$(date +%H:%M:%S)] $nombre"
   echo "    $PY -m src.ingest $*"
-  if "$PY" -m src.ingest "$@"; then
+  "$PY" -m src.ingest "$@"
+  local codigo=$?
+  if [ $codigo -eq 0 ]; then
     echo "    OK: $nombre"
+  elif [ $codigo -eq 3 ]; then
+    echo "    FALLO DE CONEXIÓN: $nombre. Se detiene la carga: arregla la conexión"
+    echo "    (ver el mensaje anterior y docs/plan_ingesta.md, apartado 6) y vuelve a lanzar el script."
+    FALLOS+=("$nombre (conexión)")
+    resumen_y_salir
   else
-    echo "    FALLO: $nombre (código $?)"
+    echo "    FALLO: $nombre (código $codigo)"
     FALLOS+=("$nombre")
   fi
 }
@@ -110,13 +130,4 @@ for fuente in $FUENTES; do
   esac
 done
 
-echo ""
-echo "================================================================"
-if [ ${#FALLOS[@]} -eq 0 ]; then
-  echo "Carga inicial terminada sin fallos. Revisa las incidencias de cada manifest.json."
-  exit 0
-fi
-echo "Terminado con ${#FALLOS[@]} paso(s) fallido(s):"
-printf '  - %s\n' "${FALLOS[@]}"
-echo "Vuelve a lanzar el script: lo ya descargado se reutiliza."
-exit 1
+resumen_y_salir
