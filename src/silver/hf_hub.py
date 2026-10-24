@@ -2,8 +2,10 @@
 
 * :func:`descargar_bronze` baja ``raw/<FUENTE>/`` a ``data/hf/raw`` para que
   Silver pueda ejecutarse sin haber hecho la ingesta en local.
-* :func:`subir_silver` sube ``data/silver`` a ``data/silver/`` del dataset.
-  Requiere un ``HF_TOKEN`` con permiso de **escritura** sobre el dataset.
+* :func:`subir_silver` sube ``data/silver`` a ``data/silver/`` del dataset y
+  borra allí las tablas e informes que ya no existen en local, para que el
+  dataset refleje la capa Silver actual. Requiere un ``HF_TOKEN`` con permiso
+  de **escritura** sobre el dataset.
 """
 
 from __future__ import annotations
@@ -25,6 +27,8 @@ FUENTES_POR_TABLA = {
     "incendios": ("egif",),
 }
 RUTA_SILVER_EN_REPO = "data/silver"
+#: Ficheros remotos de Silver que se borran si ya no están en local.
+BORRAR_SI_NO_ESTAN = ["*.parquet", "informes/*"]
 
 
 def descargar_bronze(tablas: list[str], cfg: config.HuggingFaceConfig | None = None) -> None:
@@ -47,7 +51,7 @@ def subir_silver(base_dir: Path | None = None, cfg: config.HuggingFaceConfig | N
     try:
         api.upload_folder(folder_path=str(carpeta), path_in_repo=RUTA_SILVER_EN_REPO, repo_id=cfg.repo_id,
                           repo_type=cfg.repo_type, commit_message="Silver: actualización de tablas e informes",
-                          ignore_patterns=[".gitkeep"])
+                          ignore_patterns=[".gitkeep"], delete_patterns=BORRAR_SI_NO_ESTAN)
     except Exception as exc:  # noqa: BLE001
         if "403" in str(exc) or "401" in str(exc):
             raise RuntimeError(

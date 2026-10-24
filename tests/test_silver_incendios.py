@@ -78,3 +78,14 @@ def test_informes_de_asignacion():
     assert muestra["nombre_asignado"].tolist() == ["Abegondo"]
     resumen = incendios.resumen_asignacion(df)
     assert resumen["pct_asignados"].tolist() == [50.0]
+
+
+def test_asignacion_a_revisar_solo_discrepancias_y_por_coordenadas():
+    municipio, _ = municipios_df()
+    df = _asignar([parte("a", "ABEGONDO", "01/07/2020 10:00:00", *CENTRO["15001"]),
+                   parte("b", "ABEGONDO", "01/07/2020 10:00:00", *CENTRO["15002"]),
+                   parte("c", "INDETERMINADO", "01/07/2020 10:00:00", *CENTRO["15002"]),
+                   parte("d", "PORTUGAL", "02/07/2020 10:00:00")])
+    revisar = incendios.asignacion_a_revisar(df, municipio)
+    assert revisar["metodo_asignacion"].tolist() == ["nombre_coordenadas_discrepan", "coordenadas"]
+    assert revisar["nombre_coordenadas"].tolist() == ["A Cañiza", "A Cañiza"]

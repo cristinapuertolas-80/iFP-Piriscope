@@ -3,7 +3,8 @@
 Comprueba el contrato de cada entidad Silver (apartado 7 y Anexo A del diseño
 técnico) sobre las tablas **ya generadas**, no sobre el código:
 
-* esquema: columnas obligatorias y tipos (ids texto, ``fecha`` como fecha,
+* esquema: exactamente las columnas del modelo de datos (``almacen.COLUMNAS``
+  + ``fecha_insert``) y sus tipos (ids texto, ``fecha`` como fecha,
   ``fecha_insert`` en UTC);
 * claves primarias únicas y no nulas, con el formato documentado
   (``id_municipio`` de 5 cifras, ``id_obs_meteo = id_municipio_fecha``…);
@@ -35,8 +36,6 @@ from src.ingest import config
 from . import almacen
 from .calidad import RANGOS
 from .fwi import VARIABLES as VARIABLES_FWI
-from .incendios import METODOS
-from .meteo import VARIABLES as VARIABLES_METEO
 
 log = logging.getLogger("piriscope.silver.validacion")
 
@@ -47,20 +46,8 @@ CAJA_GALICIA = (43.8, -9.35, 41.8, -6.7)
 #: HU-04: porcentaje mínimo de partes con código INE desde este año.
 PCT_MIN_INE, ANIO_MIN_INE = 95.0, 2001
 DIST_MAX_ESTACION_KM = 50.0
-DIST_MAX_CELDA_KM = 30.0
 
-ESQUEMAS: dict[str, list[str]] = {
-    "municipio": ["id_municipio", "nombre", "id_provincia", "provincia", "lat_centroide",
-                  "lon_centroide", "reservado", "fecha_insert"],
-    "estacion_aemet": ["id_estacion_aemet", "nombre", "latitud", "longitud", "altitud", "fecha_insert"],
-    "observacion_meteorologica": ["id_obs_meteo", "id_municipio", "fecha", "id_estacion_aemet",
-                                  "dist_estacion_km", *VARIABLES_METEO, "fecha_insert"],
-    "indicador_fwi": ["id_indicador_fwi", "id_municipio", "fecha", *VARIABLES_FWI, "origen_fwi",
-                      "fecha_insert"],
-    "evento_incendio": ["id_evento", "id_municipio", "fecha_deteccion", "fecha_extincion", "causa",
-                        "superficie_forestal_ha", "coordenada_x", "coordenada_y", "huso", "datum",
-                        "metodo_asignacion", "fecha_insert"],
-}
+ESQUEMAS: dict[str, list[str]] = {t: [*cols, "fecha_insert"] for t, cols in almacen.COLUMNAS.items()}
 CLAVES = {"municipio": "id_municipio", "estacion_aemet": "id_estacion_aemet",
           "observacion_meteorologica": "id_obs_meteo", "indicador_fwi": "id_indicador_fwi",
           "evento_incendio": "id_evento"}
@@ -105,6 +92,8 @@ class Validador:
         tipos = {f.name: str(f.type) for f in pq.read_schema(ruta)}
         faltan = [c for c in ESQUEMAS[tabla] if c not in tipos]
         self.comprobar(tabla, "columnas_obligatorias", not faltan, f"faltan {faltan}")
+        sobran = [c for c in tipos if c not in ESQUEMAS[tabla]]
+        self.comprobar(tabla, "sin_columnas_fuera_del_modelo", not sobran, f"sobran {sobran}")
         ids_no_texto = [c for c in COLUMNAS_ID & set(tipos) if tipos[c] not in ("string", "large_string")]
         self.comprobar(tabla, "ids_como_texto", not ids_no_texto, f"no son texto: {ids_no_texto}")
         if "fecha" in tipos:
@@ -162,22 +151,14 @@ class Validador:
         self.comprobar("municipio", "id_municipio_5_cifras", df["id_municipio"].str.fullmatch(r"\d{5}").all(),
                        "hay códigos que no son de 5 cifras")
         self.comprobar("municipio", "provincia_coherente_con_codigo",
-                       (df["id_municipio"].str[:2] == df["id_provincia"]).all(), "id_provincia ≠ 2 primeras cifras")
-        por_prov = df["id_provincia"].value_counts().to_dict()
+                       (df["id_municipio"].str[:2].map(config.PROVINCIAS_GALICIA) == df["provincia"]).all(),
+                       "provincia no coincide con las 2 primeras cifras de id_municipio")
+        por_prov = df["id_municipio"].str[:2].value_counts().to_dict()
         self.comprobar("municipio", "municipios_por_provincia", por_prov == MUNICIPIOS_POR_PROVINCIA, str(por_prov))
-        self.comprobar("municipio", "provincia_nombre", df["provincia"].isin(config.PROVINCIAS_GALICIA.values()).all(),
-                       "nombres de provincia no reconocidos")
         self.comprobar("municipio", "nombre_sin_nulos", df["nombre"].notna().all(), "municipios sin nombre")
         self.en_galicia("municipio", df["lat_centroide"], df["lon_centroide"], "centroides_en_galicia")
         self.comprobar("municipio", "reservado_definido", df["reservado"].notna().all(),
                        "reservado nulo: falta docs/municipios_reservados.csv (ML)", nivel="aviso")
-        limites = almacen.silver_dir(self.base_dir) / "municipio_limites.parquet"
-        if self.comprobar("municipio", "limites_existen", limites.exists(), str(limites)):
-            import geopandas as gpd
-
-            g = gpd.read_parquet(limites)
-            self.comprobar("municipio", "limites_313_validos", len(g) == len(df) and g.geometry.is_valid.all(),
-                           f"{len(g)} polígonos, {int((~g.geometry.is_valid).sum())} no válidos", nivel="aviso")
         return set(df["id_municipio"])
 
     def estacion_aemet(self) -> set[str]:
@@ -212,9 +193,6 @@ class Validador:
                        df["dist_estacion_km"].between(0, DIST_MAX_ESTACION_KM).all(),
                        f"máx {df['dist_estacion_km'].max():.1f} km (límite {DIST_MAX_ESTACION_KM})")
         self.rangos(t, df)
-        self.comprobar(t, "tmin_le_tmax", not (df["temperatura_min"] > df["temperatura_max"]).fillna(False).any(),
-                       f"{int((df['temperatura_min'] > df['temperatura_max']).fillna(False).sum())} días con tmin > tmax",
-                       nivel="aviso")
         for col in ("temperatura", "precipitacion"):
             pct = 100 * df[col].isna().mean()
             self.comprobar(t, f"cobertura_{col}", pct <= 30, f"{pct:.1f} % nulos", nivel="aviso")
@@ -229,8 +207,6 @@ class Validador:
         self.foranea(t, df, "id_municipio", municipios)
         self.comprobar(t, "todos_los_municipios", set(df["id_municipio"]) == municipios,
                        f"{len(municipios - set(df['id_municipio']))} municipios sin FWI")
-        self.comprobar(t, "origen_fwi_valido", df["origen_fwi"].isin(["consolidado", "intermedio"]).all(),
-                       "valores de origen_fwi no reconocidos")
         por_dia = df.groupby("fecha")["id_municipio"].nunique()
         self.comprobar(t, "todos_los_municipios_cada_dia", (por_dia == len(municipios)).all(),
                        f"{int((por_dia != len(municipios)).sum())} días incompletos")
@@ -239,9 +215,6 @@ class Validador:
         self.comprobar(t, "dias_sin_fwi", len(sin) == 0,
                        f"{len(sin)} días sin FWI (meses: {sorted({d.strftime('%Y-%m') for d in sin})[:12]})",
                        nivel="aviso")
-        if "dist_celda_km" in df:
-            self.comprobar(t, "dist_celda_km_valida", df["dist_celda_km"].between(0, DIST_MAX_CELDA_KM).all(),
-                           f"máx {df['dist_celda_km'].max():.1f} km")
         self.comprobar(t, "fwi_sin_nulos", df[VARIABLES_FWI].notna().all().all(),
                        f"{int(df[VARIABLES_FWI].isna().any(axis=1).sum())} filas con nulos", nivel="aviso")
         self.rangos(t, df)
@@ -253,21 +226,12 @@ class Validador:
             return
         self.clave_primaria(t, df)
         self.foranea(t, df, "id_municipio", municipios, nulos_ok=True)
-        self.comprobar(t, "metodo_asignacion_valido", df["metodo_asignacion"].isin(METODOS).all(),
-                       "métodos no reconocidos")
-        self.comprobar(t, "asignado_si_y_solo_si_metodo",
-                       (df["id_municipio"].isna() == (df["metodo_asignacion"] == "sin_asignar")).all(),
-                       "id_municipio y metodo_asignacion incoherentes")
         self.comprobar(t, "fecha_deteccion_sin_nulos", df["fecha_deteccion"].notna().all(),
                        f"{int(df['fecha_deteccion'].isna().sum())} partes sin fecha de detección")
         recientes = df[df["fecha_deteccion"].dt.year >= ANIO_MIN_INE]
         pct = 100 * recientes["id_municipio"].notna().mean() if len(recientes) else 0.0
         self.comprobar(t, "hu04_pct_codigo_ine", pct >= PCT_MIN_INE,
                        f"{pct:.2f} % de partes desde {ANIO_MIN_INE} con código INE (mínimo {PCT_MIN_INE} %)")
-        if "campana" in df:
-            distinta = int((df["campana"] != df["fecha_deteccion"].dt.year).fillna(False).sum())
-            self.comprobar(t, "campana_coherente_con_fecha", distinta == 0,
-                           f"{distinta} partes con campaña distinta del año de detección", nivel="aviso")
         al_reves = int((df["fecha_extincion"] < df["fecha_deteccion"]).fillna(False).sum())
         self.comprobar(t, "extincion_posterior_a_deteccion", al_reves == 0,
                        f"{al_reves} partes con extinción anterior a la detección", nivel="aviso")

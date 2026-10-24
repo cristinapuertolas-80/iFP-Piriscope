@@ -7,6 +7,7 @@
 """
 
 import pandas as pd
+import pyarrow as pa
 import pytest
 
 from src.ingest import config
@@ -61,9 +62,12 @@ def test_detecta_huecos_en_la_serie_diaria(silver):
     assert "serie_diaria_completa" in _fallidas(validacion.validar(silver))
 
 
-def test_detecta_asignacion_incoherente(silver):
-    _corromper(silver, "evento_incendio", lambda df: df.assign(metodo_asignacion="nombre_validado"))
-    assert "asignado_si_y_solo_si_metodo" in _fallidas(validacion.validar(silver))
+def test_detecta_columnas_fuera_del_modelo(silver):
+    import pyarrow.parquet as pq
+
+    ruta = almacen.ruta_tabla("indicador_fwi", silver)
+    pq.write_table(pq.read_table(ruta).append_column("dist_celda_km", pa.array([1.0] * 4)), ruta)
+    assert "sin_columnas_fuera_del_modelo" in _fallidas(validacion.validar(silver))
 
 
 def test_detecta_tabla_ausente(silver):

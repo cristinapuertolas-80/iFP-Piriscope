@@ -2,9 +2,10 @@
 
 Lee los datos crudos de Bronze (``data/bronze`` o su copia de Hugging Face en
 ``data/hf/raw``) y genera en ``data/silver`` las cinco entidades Silver del
-modelo de datos (apartado 7 del diseño técnico):
+modelo de datos (apartado 7 del diseño técnico), con
+exactamente las columnas del Anexo A:
 
-* ``municipio.parquet`` (+ ``municipio_limites.parquet`` con los polígonos)
+* ``municipio.parquet``
 * ``estacion_aemet.parquet``
 * ``observacion_meteorologica.parquet``
 * ``evento_incendio.parquet``

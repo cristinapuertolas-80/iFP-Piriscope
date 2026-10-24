@@ -4,9 +4,9 @@
    día de una estación aparece en varias ingestas (tramos solapados, últimos 10
    días del cron), prevalece la **ingesta más reciente**, porque AEMET publica
    con retraso y corrige valores.
-2. Se tipan los valores: coma decimal, ``Ip`` (precipitación inapreciable,
-   < 0,1 mm) = 0,0, ``Acum``/``Varias`` = nulo; la dirección del viento pasa de
-   decenas de grado a grados (``88``/``99`` = nulo).
+2. Se tipan las cuatro variables del Anexo A (temperatura, humedad relativa,
+   viento y precipitación): coma decimal, ``Ip`` (precipitación inapreciable,
+   < 0,1 mm) = 0,0, ``Acum``/``Varias`` = nulo.
 3. Cada municipio se asocia a **su estación más cercana** (distancia del
    centroide a la estación, DEC-08), elegida entre las estaciones con datos; la
    asignación es fija para todo el periodo y ``dist_estacion_km`` queda como
@@ -33,21 +33,12 @@ log = logging.getLogger("piriscope.silver.meteo")
 
 ENCODINGS = ("ISO-8859-15", "utf-8", "latin-1")
 
-#: Campo de AEMET -> columna Silver. Unidades: °C, %, mm, m/s, grados, horas, hPa.
+#: Campo de AEMET -> columna Silver (Anexo A). Medida diaria: media; unidades °C, %, m/s y mm.
 VARIABLES_AEMET: dict[str, str] = {
     "tmed": "temperatura",
-    "tmax": "temperatura_max",
-    "tmin": "temperatura_min",
     "hrMedia": "humedad_relativa",
-    "hrMax": "humedad_relativa_max",
-    "hrMin": "humedad_relativa_min",
-    "prec": "precipitacion",
     "velmedia": "viento",
-    "racha": "racha_max",
-    "dir": "direccion_viento",
-    "sol": "insolacion",
-    "presMax": "presion_max",
-    "presMin": "presion_min",
+    "prec": "precipitacion",
 }
 VARIABLES = list(VARIABLES_AEMET.values())
 
@@ -73,12 +64,6 @@ def a_numero(serie: pd.Series, inapreciable: float | None = None) -> pd.Series:
     return pd.to_numeric(texto, errors="coerce").astype("Float64")
 
 
-def direccion_grados(serie: pd.Series) -> pd.Series:
-    """AEMET da la dirección de la racha en decenas de grado; 88 y 99 no son direcciones."""
-    decenas = a_numero(serie)
-    return (decenas.where((decenas >= 0) & (decenas <= 36)) * 10).astype("Float64")
-
-
 def tipar_registros(registros: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame({
         "id_estacion_aemet": registros["indicativo"].astype("string").str.strip(),
@@ -86,10 +71,7 @@ def tipar_registros(registros: pd.DataFrame) -> pd.DataFrame:
     })
     for campo, col in VARIABLES_AEMET.items():
         serie = registros[campo] if campo in registros.columns else pd.Series(pd.NA, index=registros.index)
-        if campo == "dir":
-            out[col] = direccion_grados(serie)
-        else:
-            out[col] = a_numero(serie, inapreciable=0.0 if campo == "prec" else None)
+        out[col] = a_numero(serie, inapreciable=0.0 if campo == "prec" else None)
     out["timestamp_ingesta"] = registros["timestamp_ingesta"].astype("string")
     return out
 
@@ -142,7 +124,6 @@ def leer_estaciones(bronze_dir: Path | None = None, hf_dir: Path | None = None) 
     return pd.DataFrame({
         "id_estacion_aemet": df["indicativo"].astype("string").str.strip(),
         "nombre": df["nombre"].astype("string").str.strip(),
-        "provincia": df["provincia"].astype("string").str.strip(),
         "latitud": pd.to_numeric(df["latitud_dec"], errors="coerce"),
         "longitud": pd.to_numeric(df["longitud_dec"], errors="coerce"),
         "altitud": a_numero(df["altitud"]),

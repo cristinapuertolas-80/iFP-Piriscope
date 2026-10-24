@@ -6,10 +6,14 @@
 * El FWI se **muestrea en el centroide** de cada municipio (DEC-09): se toma la
   celda de la rejilla (0,25°) más cercana al centroide entre las celdas con
   dato; las celdas de mar no tienen FWI, así que a un municipio costero se le
-  asigna la celda de tierra más próxima. Se guardan las coordenadas de la
-  celda y su distancia (``dist_celda_km``) como indicador de calidad.
+  asigna la celda de tierra más próxima.
 * Si un día está en varios ficheros, prevalece el **consolidado** sobre el
   intermedio y, a igualdad, la ingesta más reciente (DEC-31).
+
+:func:`procesar` devuelve además ``origen_fwi``, ``lat_celda``, ``lon_celda`` y
+``dist_celda_km`` para los informes (``asignacion_celdas_fwi.csv`` e
+``informe_calidad.json``); a ``indicador_fwi.parquet`` sólo pasan las columnas
+del modelo de datos.
 """
 
 from __future__ import annotations

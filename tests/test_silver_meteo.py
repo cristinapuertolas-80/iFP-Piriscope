@@ -28,11 +28,6 @@ def test_a_numero_coma_decimal_ip_y_acum():
     assert pd.isna(meteo.a_numero(pd.Series(["Ip"]))[0])  # Ip sólo vale 0 en la precipitación
 
 
-def test_direccion_de_decenas_de_grado_a_grados():
-    assert meteo.direccion_grados(pd.Series(["21", "99", "88", "0"])).tolist()[0] == 210.0
-    assert meteo.direccion_grados(pd.Series(["21", "99", "88", "0"])).isna().tolist() == [False, True, True, False]
-
-
 def test_leer_diarios_prevalece_la_ingesta_mas_reciente(tmp_path):
     escribir_aemet(tmp_path / "aemet" / "20260101T000000Z",
                    {"0001_2026-01-01_2026-01-02.json": [_reg("2026-01-01", tmed="10,0", prec="Ip"),

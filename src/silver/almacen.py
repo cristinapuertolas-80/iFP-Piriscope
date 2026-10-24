@@ -5,6 +5,9 @@
 * Cada ejecución **sobrescribe sólo el periodo reprocesado** (apartado 7,
   Trazabilidad): si la tabla ya existe y tiene columna de fecha, se conservan
   las filas fuera de ``[desde, hasta]`` y se sustituyen las de dentro.
+* Cada tabla tiene **exactamente** las columnas del modelo de datos (apartado 7
+  y Anexo A, :data:`COLUMNAS`). Lo que se calcula de más en el cruce
+  (celda FWI, método de asignación INE…) va a ``informes/``, no a la tabla.
 """
 
 from __future__ import annotations
@@ -23,6 +26,18 @@ log = logging.getLogger("piriscope.silver")
 
 #: Columnas de tipo fecha (sin hora) que se guardan como date32.
 COLUMNAS_FECHA = ("fecha",)
+
+#: Columnas de cada entidad Silver según el apartado 7 y el Anexo A (``fecha_insert`` se añade al guardar).
+COLUMNAS: dict[str, list[str]] = {
+    "municipio": ["id_municipio", "nombre", "provincia", "lat_centroide", "lon_centroide", "reservado"],
+    "estacion_aemet": ["id_estacion_aemet", "nombre", "latitud", "longitud", "altitud"],
+    "observacion_meteorologica": ["id_obs_meteo", "id_municipio", "id_estacion_aemet", "fecha",
+                                  "dist_estacion_km", "temperatura", "humedad_relativa", "viento",
+                                  "precipitacion"],
+    "indicador_fwi": ["id_indicador_fwi", "id_municipio", "fecha", "fwi", "ffmc", "dmc", "dc", "isi", "bui"],
+    "evento_incendio": ["id_evento", "id_municipio", "fecha_deteccion", "fecha_extincion", "causa",
+                        "superficie_forestal_ha", "coordenada_x", "coordenada_y", "huso", "datum"],
+}
 
 
 def silver_dir(base_dir: Path | None = None) -> Path:
@@ -69,10 +84,11 @@ def guardar(df: pd.DataFrame, tabla: str, columna_fecha: str | None = None,
             fecha_insert: pd.Timestamp | None = None) -> Path:
     """Guarda ``df`` en ``data/silver/<tabla>.parquet`` añadiendo ``fecha_insert``.
 
-    Con ``columna_fecha`` y un rango, sólo se sustituye ese periodo de la tabla
-    existente. Sin rango, la tabla se reescribe entera.
+    Sólo se escriben las columnas de :data:`COLUMNAS`. Con ``columna_fecha`` y
+    un rango, sólo se sustituye ese periodo de la tabla existente. Sin rango, la
+    tabla se reescribe entera.
     """
-    df = df.copy()
+    df = df[COLUMNAS[tabla]].copy() if tabla in COLUMNAS else df.copy()
     df["fecha_insert"] = fecha_insert if fecha_insert is not None else ahora_utc()
     ruta = ruta_tabla(tabla, base_dir)
 

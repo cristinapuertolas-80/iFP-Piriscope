@@ -39,16 +39,24 @@ def test_pipeline_completo(tmp_path):
     assert meteo["humedad_relativa"].isna().all()  # 150 % está fuera de rango -> nulo
     assert len(fwi) == 4 and (fwi["fwi"] == 7.0).all()
     assert eventos["id_municipio"].isna().tolist() == [False, True]
-    for tabla in (municipio, meteo, fwi, eventos):
-        assert "fecha_insert" in tabla.columns
+    for nombre, tabla in (("municipio", municipio), ("observacion_meteorologica", meteo),
+                          ("indicador_fwi", fwi), ("evento_incendio", eventos)):
+        assert tabla.columns.tolist() == [*almacen.COLUMNAS[nombre], "fecha_insert"]
+    assert not (silver / "municipio_limites.parquet").exists()
 
     informes = silver / "informes"
     resumen = json.loads((informes / "informe_calidad.json").read_text(encoding="utf-8"))
     assert resumen["evento_incendio"]["pct_con_codigo_ine"] == 50.0
     assert resumen["observacion_meteorologica"]["valores_fuera_rango"] == 1
+    assert resumen["indicador_fwi"]["meses_intermedio"] == []
     for nombre in ("valores_fuera_rango.csv", "asignacion_estaciones.csv", "incendios_no_asignados.csv",
-                   "incendios_muestra_validacion.csv", "cobertura_meteo_municipios.csv"):
+                   "incendios_muestra_validacion.csv", "cobertura_meteo_municipios.csv",
+                   "asignacion_celdas_fwi.csv", "incendios_asignacion_a_revisar.csv"):
         assert (informes / nombre).exists()
+    import pandas as pd
+
+    celdas = pd.read_csv(informes / "asignacion_celdas_fwi.csv", dtype={"id_municipio": str})
+    assert len(celdas) == 2 and celdas["dist_celda_km"].notna().all()
 
 
 def test_reproceso_parcial_no_duplica_ni_borra(tmp_path, monkeypatch):
@@ -74,7 +82,7 @@ def test_cli_error_si_no_hay_bronze(tmp_path, monkeypatch):
     assert main(["--tablas", "municipios"]) == 2
 
 
-def test_tablas_sin_municipios_requiere_municipio_previo(tmp_path):
+def test_tablas_sin_municipios_requiere_bronze_de_municipios(tmp_path):
     with pytest.raises(FileNotFoundError):
         pipeline.ejecutar(tablas=["meteo"], base_dir=tmp_path / "silver", bronze_dir=tmp_path,
                           hf_dir=tmp_path)

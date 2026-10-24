@@ -22,18 +22,9 @@ log = logging.getLogger("piriscope.silver.calidad")
 RANGOS: dict[str, tuple[float | None, float | None]] = {
     # AEMET (valores diarios)
     "temperatura": (-30, 50),
-    "temperatura_max": (-30, 50),
-    "temperatura_min": (-30, 50),
     "humedad_relativa": (0, 100),
-    "humedad_relativa_max": (0, 100),
-    "humedad_relativa_min": (0, 100),
     "precipitacion": (0, 500),
     "viento": (0, 60),
-    "racha_max": (0, 100),
-    "direccion_viento": (0, 360),
-    "insolacion": (0, 16),
-    "presion_max": (850, 1100),
-    "presion_min": (850, 1100),
     # FWI y componentes (Canadian Forest Fire Weather Index System)
     "fwi": (0, None),
     "ffmc": (0, 101),

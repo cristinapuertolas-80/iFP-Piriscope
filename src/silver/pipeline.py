@@ -3,6 +3,11 @@
 Orden: municipios (necesarios para el resto) -> meteorología AEMET -> FWI ->
 incendios EGIF. Con ``desde``/``hasta`` sólo se reprocesa ese periodo de las
 tablas con fecha; ``municipio`` y ``estacion_aemet`` se reescriben siempre.
+
+El municipio y sus límites se construyen siempre desde Bronze en memoria (el
+cruce necesita ``id_provincia``, ``nombre_ine`` y los polígonos, que no forman
+parte de la tabla Silver); sólo se escribe ``municipio.parquet`` si se pide la
+tabla ``municipios``.
 """
 
 from __future__ import annotations
@@ -26,25 +31,12 @@ def _rango(df: pd.DataFrame, col: str) -> dict[str, str | None]:
     return {"desde": str(pd.Timestamp(df[col].min()).date()), "hasta": str(pd.Timestamp(df[col].max()).date())}
 
 
-def etapa_municipios(informe: calidad.Informe, base_dir: Path | None, **kw):
-    municipio, limites = municipios.procesar(**kw)
+def etapa_municipios(municipio: pd.DataFrame, informe: calidad.Informe, base_dir: Path | None) -> None:
     almacen.guardar(municipio, "municipio", ordenar_por=["id_municipio"], base_dir=base_dir)
-    municipios.guardar_limites(limites, base_dir)
     informe.tabla("municipio", filas=len(municipio),
                   duplicados=calidad.duplicados(municipio, "id_municipio"),
                   por_provincia=municipio["provincia"].value_counts().sort_index().to_dict(),
                   reservado_definido=bool(municipio["reservado"].notna().all()))
-    return municipio, limites
-
-
-def cargar_municipios(base_dir: Path | None):
-    import geopandas as gpd
-
-    ruta = almacen.ruta_tabla("municipio", base_dir)
-    limites = almacen.silver_dir(base_dir) / "municipio_limites.parquet"
-    if not ruta.exists() or not limites.exists():
-        raise FileNotFoundError("Falta data/silver/municipio.parquet: ejecuta antes la tabla 'municipios'")
-    return almacen.leer("municipio", base_dir), gpd.read_parquet(limites)
 
 
 def etapa_meteo(municipio: pd.DataFrame, informe: calidad.Informe, desde: date | None,
@@ -86,12 +78,17 @@ def etapa_fwi(municipio: pd.DataFrame, informe: calidad.Informe, desde: date | N
     informe.anomalias(anomalias)
     almacen.guardar(df, "indicador_fwi", "fecha", desde, hasta,
                     ordenar_por=["id_municipio", "fecha"], base_dir=base_dir)
+    informe.csv("asignacion_celdas_fwi.csv", df.drop_duplicates("id_municipio")[
+        ["id_municipio", "lat_celda", "lon_celda", "dist_celda_km"]].merge(
+        municipio[["id_municipio", "nombre", "provincia", "lat_centroide", "lon_centroide"]], on="id_municipio"))
     rango = _rango(df, "fecha")
     ausentes = (fwi.meses_ausentes(fwi.inventario(**kw), date.fromisoformat(rango["desde"]),
                                    date.fromisoformat(rango["hasta"])) if rango["desde"] else [])
+    intermedio = df.loc[df["origen_fwi"] == "intermedio", "fecha"]
     informe.tabla("indicador_fwi", filas_periodo=len(df), **rango,
                   duplicados=calidad.duplicados(df, "id_indicador_fwi"),
-                  dias_intermedio=int(df.loc[df["origen_fwi"] == "intermedio", "fecha"].nunique()),
+                  dias_intermedio=int(intermedio.nunique()),
+                  meses_intermedio=sorted(intermedio.dt.strftime("%Y-%m").unique().tolist()),
                   meses_sin_fichero=ausentes,
                   dist_celda_km_max=round(float(df["dist_celda_km"].max()), 2) if len(df) else None,
                   nulos_pct=calidad.porcentaje_nulos(df, fwi.VARIABLES),
@@ -101,15 +98,17 @@ def etapa_fwi(municipio: pd.DataFrame, informe: calidad.Informe, desde: date | N
 
 def etapa_incendios(municipio: pd.DataFrame, limites, informe: calidad.Informe, desde: date | None,
                     hasta: date | None, base_dir: Path | None, **kw) -> pd.DataFrame:
-    df = incendios.procesar(municipio, limites, desde, hasta, **kw)
+    # EGIF es un único fichero: se procesa entero para que los informes de HU-04 cubran
+    # todos los partes, y ``guardar`` sólo sustituye el periodo pedido.
+    df = incendios.procesar(municipio, limites, **kw)
     df, anomalias = calidad.aplicar_rangos(df, "evento_incendio", "id_evento")
     informe.anomalias(anomalias)
     almacen.guardar(df, "evento_incendio", "fecha_deteccion", desde, hasta,
                     ordenar_por=["fecha_deteccion", "id_evento"], base_dir=base_dir)
-    df = almacen.leer("evento_incendio", base_dir)  # los informes de HU-04 cubren toda la tabla
     informe.csv("incendios_no_asignados.csv", incendios.informe_no_asignados(df))
     informe.csv("incendios_muestra_validacion.csv", incendios.muestra_validacion(df, municipio))
     informe.csv("incendios_asignacion_por_campana.csv", incendios.resumen_asignacion(df))
+    informe.csv("incendios_asignacion_a_revisar.csv", incendios.asignacion_a_revisar(df, municipio))
     metodos = df["metodo_asignacion"].value_counts().to_dict()
     informe.tabla("evento_incendio", filas_periodo=len(df), **_rango(df, "fecha_deteccion"),
                   duplicados_id_evento=calidad.duplicados(df, "id_evento"),
@@ -128,11 +127,10 @@ def ejecutar(desde: date | None = None, hasta: date | None = None, tablas: list[
     tablas = list(tablas or TABLAS)
     kw = {"bronze_dir": bronze_dir, "hf_dir": hf_dir}
     informe = calidad.Informe(base_dir)
+    municipio, limites = municipios.procesar(**kw)
     if "municipios" in tablas:
         log.info("=== Silver: municipios ===")
-        municipio, limites = etapa_municipios(informe, base_dir, **kw)
-    else:
-        municipio, limites = cargar_municipios(base_dir)
+        etapa_municipios(municipio, informe, base_dir)
     if "meteo" in tablas:
         log.info("=== Silver: meteorología AEMET ===")
         etapa_meteo(municipio, informe, desde, hasta, base_dir, **kw)

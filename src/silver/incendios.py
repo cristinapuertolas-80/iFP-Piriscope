@@ -22,6 +22,10 @@ Parte del ``egif_galicia_unificado.parquet`` de la última ingesta de EGIF
 
    ``metodo_asignacion`` deja constancia del camino seguido y
    ``id_municipio_coordenadas`` del municipio que indican las coordenadas.
+
+Esas columnas de la asignación sirven para los informes de HU-04
+(``informes/incendios_*.csv``); a ``evento_incendio.parquet`` sólo pasan las
+columnas del modelo de datos.
 """
 
 from __future__ import annotations
@@ -263,3 +267,14 @@ def resumen_asignacion(eventos: pd.DataFrame) -> pd.DataFrame:
                         n_validados=("metodo_asignacion", lambda s: int((s == "nombre_validado").sum())))
                    .assign(pct_asignados=lambda d: (100 * d["n_asignados"] / d["n_partes"]).round(2))
                    .reset_index())
+
+
+def asignacion_a_revisar(eventos: pd.DataFrame, municipios: pd.DataFrame) -> pd.DataFrame:
+    """Partes en que nombre y coordenadas no coinciden o sólo se asignaron por coordenadas (DEC-35)."""
+    nombres = municipios.set_index("id_municipio")["nombre"]
+    revisar = eventos[eventos["metodo_asignacion"].isin(["nombre_coordenadas_discrepan", "coordenadas"])]
+    revisar = revisar.assign(nombre_asignado=revisar["id_municipio"].map(nombres),
+                             nombre_coordenadas=revisar["id_municipio_coordenadas"].map(nombres))
+    return revisar[["id_evento", "campana", "id_provincia", "municipio_egif", "metodo_asignacion",
+                    "asignado_otra_provincia", "id_municipio", "nombre_asignado", "id_municipio_coordenadas",
+                    "nombre_coordenadas", "latitud", "longitud"]]

@@ -8,8 +8,10 @@
 * ``reservado`` se lee de ``docs/municipios_reservados.csv`` (lo fija ML,
   HU-06); mientras no exista, queda nulo.
 
-Salidas: ``municipio.parquet`` y ``municipio_limites.parquet`` (GeoParquet en
-EPSG:4326, para el cruce de los partes de EGIF y el mapa del dashboard).
+Devuelve el municipio con ``id_provincia`` y ``nombre_ine`` (los usa el cruce de
+los partes de EGIF) y los límites en EPSG:4326, que sólo se usan en memoria
+para validar las coordenadas de los partes. A ``municipio.parquet`` sólo pasan
+las columnas del modelo de datos (``almacen.COLUMNAS``).
 """
 
 from __future__ import annotations
@@ -138,11 +140,3 @@ def procesar(bronze_dir: Path | None = None, hf_dir: Path | None = None):
     if reservados is None:
         log.info("Sin docs/municipios_reservados.csv: 'reservado' queda nulo hasta que ML lo fije")
     return construir(leer_diccionario_ine(ruta_ine), leer_recintos_cnig(ruta_cnig), reservados)
-
-
-def guardar_limites(limites, base_dir: Path | None = None) -> Path:
-    from . import almacen
-
-    ruta = almacen.silver_dir(base_dir) / "municipio_limites.parquet"
-    limites.to_parquet(ruta, index=False)
-    return ruta

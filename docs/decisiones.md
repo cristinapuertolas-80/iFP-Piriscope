@@ -336,11 +336,12 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 - **Decisión:**
   - Módulo propio `src/silver` (separado de Gold), CLI `python -m src.silver` y etapa `silver` de `run_pipeline.py`.
   - Lee las ejecuciones de Bronze locales (`data/bronze/<fuente>/`) o su copia de Hugging Face (`data/hf/raw/<FUENTE>/`, `--descargar-hf`); si un timestamp está en ambas, prevalece la local.
-  - Una tabla Parquet por entidad Silver del modelo de datos (`municipio`, `estacion_aemet`, `observacion_meteorologica`, `evento_incendio`, `indicador_fwi`) más `municipio_limites` (GeoParquet) y los informes de `data/silver/informes/`.
+  - Una tabla Parquet por entidad Silver del modelo de datos (`municipio`, `estacion_aemet`, `observacion_meteorologica`, `evento_incendio`, `indicador_fwi`) y los informes de `data/silver/informes/`.
+  - Cada tabla tiene **exactamente las columnas del apartado 7 y el Anexo A** (`almacen.COLUMNAS`) más `fecha_insert`. Lo que el cruce calcula de más (celda FWI, origen consolidado/intermedio, método de asignación INE, nombre en EGIF…) va a `informes/`, no a las tablas; los polígonos municipales se leen de Bronze y no se guardan en Silver.
   - Identificadores como texto, `fecha` como `date32`, `fecha_insert` en UTC. Con `--desde/--hasta` sólo se sustituye ese periodo (DEC-15).
-  - `nombre` del municipio es el del CNIG (orden natural, «A Cañiza»); se conserva también `nombre_ine` («Cañiza, A»). `reservado` se toma de `docs/municipios_reservados.csv` cuando ML lo publique; hasta entonces es nulo.
-  - `--subir-hf` sube `data/silver` a `data/silver/` del dataset. Requiere un token *fine-grained* del dueño del dataset con escritura sobre él (un token *write* personal recibe 403). **Pendiente:** primera subida a Hugging Face.
-- **Alternativas descartadas:** `src/features` compartido con Gold, para trabajar en paralelo sin conflictos.
+  - `nombre` del municipio es el del CNIG (orden natural, «A Cañiza»). `reservado` se toma de `docs/municipios_reservados.csv` cuando ML lo publique; hasta entonces es nulo.
+  - `--subir-hf` sube `data/silver` a `data/silver/` del dataset y borra allí las tablas e informes que ya no existen en local. Requiere un token *fine-grained* del dueño del dataset con escritura sobre él (un token *write* personal recibe 403).
+- **Alternativas descartadas:** `src/features` compartido con Gold, para trabajar en paralelo sin conflictos. Columnas extra de trazabilidad en las tablas (`nombre_ine`, `id_provincia`, celda FWI, `metodo_asignacion`…) y `municipio_limites.parquet`: no están en el modelo de datos y repetían valores fijos por municipio en millones de filas.
 - **Consecuencias:** Gold sólo necesita leer `data/silver` (o generarlo con `python -m src.silver --descargar-hf`). `pd.read_parquet` devuelve `fecha` como `datetime.date`; `src.silver.almacen.leer()` la devuelve como `datetime64`.
 
 ### DEC-33. Meteorología en Silver: estación fija y huecos nulos
@@ -352,8 +353,9 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
   - Aplicando DEC-08 tal cual: a cada municipio se le asigna **una única estación**, la más cercana a su centroide entre las que tienen algún dato (según `cobertura_estaciones.csv` de todas las ingestas, para que la asignación no cambie con el periodo reprocesado). Resultado: 56 estaciones usadas, distancia media 10,6 km y máxima 37,8 km (Negueira de Muñiz).
   - `observacion_meteorologica` tiene una fila por municipio y día; los días sin dato de la estación asignada quedan **nulos** (no se imputa en Silver).
   - Si un día de una estación aparece en varias ingestas, prevalece la **más reciente** (AEMET corrige con retraso).
-  - Tipado: coma decimal; `Ip` (inapreciable) = 0,0 mm; `Acum`/`Varias` = nulo; dirección de decenas de grado a grados (88/99 = nulo). Se conservan todas las medidas diarias (media, máxima, mínima…) hasta que el EDA elija.
-- **Alternativas descartadas:** estación más cercana con dato cada día (menos huecos, pero se aparta de DEC-08 y mezcla estaciones en una misma serie).
+  - Tipado: coma decimal; `Ip` (inapreciable) = 0,0 mm; `Acum`/`Varias` = nulo.
+  - Sólo las cuatro variables del Anexo A, con la media diaria de AEMET: `temperatura` (`tmed`), `humedad_relativa` (`hrMedia`), `viento` (`velmedia`) y `precipitacion` (`prec`). Si el EDA elige otra medida, se cambia el campo de origen, no se añaden columnas.
+- **Alternativas descartadas:** estación más cercana con dato cada día (menos huecos, pero se aparta de DEC-08 y mezcla estaciones en una misma serie). Conservar máximas, mínimas, racha, dirección, insolación y presión hasta el EDA (no están en el Anexo A).
 - **Consecuencias:** con el histórico actual, ~18 % de días sin precipitación, ~17 % sin temperatura y ~56 % sin viento. La imputación queda pendiente para Gold/ML.
 
 ### DEC-34. FWI en Silver: celda de tierra más cercana y prioridad del consolidado
@@ -361,7 +363,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 - **Fecha:** 2026-10-24 · **Estado:** Aceptada
 - **Responsable:** Guillermo · **Issue/PR:** feat/capa-silver
 - **Contexto:** el FWI llega en rejilla de 0,25° con longitudes 0–360; las celdas de mar no tienen valor, y hay meses descargados del dataset intermedio y del consolidado.
-- **Decisión:** muestreo en el centroide (DEC-09) tomando la **celda con dato más cercana**; se guardan `lat_celda`, `lon_celda` y `dist_celda_km` (máximo 16,9 km). Para cada municipio y día prevalece el **consolidado** sobre el intermedio y, a igualdad, la ingesta más reciente; `origen_fwi` lo indica.
+- **Decisión:** muestreo en el centroide (DEC-09) tomando la **celda con dato más cercana**; la celda y su distancia (media 9,2 km, máximo 16,9 km) van a `informes/asignacion_celdas_fwi.csv`. Para cada municipio y día prevalece el **consolidado** sobre el intermedio y, a igualdad, la ingesta más reciente; los meses que siguen siendo intermedios se listan en `informe_calidad.json` (`meses_intermedio`) para recargarlos.
 - **Alternativas descartadas:** interpolación bilineal o media zonal (DEC-09 ya las deja como mejora futura).
 - **Consecuencias:** en Bronze faltan nueve meses de 2002 (enero–agosto y noviembre); se listan en `informe_calidad.json` (`meses_sin_fichero`) y deben recargarse en la ingesta.
 
@@ -376,18 +378,19 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
   3. Validación con las coordenadas UTM cruzadas con los recintos del CNIG. Datum `ETRS89` si el parte lo indica; si viene vacío se asume **ED50**.
   4. Si el nombre no casa pero las coordenadas caen en Galicia, se usa el municipio de las coordenadas.
   - Si nombre y coordenadas discrepan, **prevalece el nombre**: las discrepancias están a una mediana de 27 km del municipio declarado, lo que apunta a errores de coordenadas y no a un problema de datum.
+  - El método seguido se resume en `informe_calidad.json`; los partes con discrepancia o asignados sólo por coordenadas van a `informes/incendios_asignacion_a_revisar.csv`. La tabla `evento_incendio` sólo tiene las columnas del Anexo A.
   - De la exportación sólo se conservan los campos necesarios (DEC-27); `motivacion` y similares no pasan a Silver.
 - **Resultado (2001–2023):** 99,98 % de partes con código INE; 96,0 % validados por coordenadas, 3,5 % con discrepancia y 0,3 % sin coordenadas. Los no asignados son «PORTUGAL», «OTRA PROVINCIA» y municipios de León y Zamora. Antes de 1983 los partes figuran como «INDETERMINADO» sin coordenadas y quedan sin asignar.
-- **Consecuencias:** `metodo_asignacion` e `id_municipio_coordenadas` permiten excluir en Gold los casos dudosos. **Pendiente:** completar la validación manual de `incendios_muestra_validacion.csv`. **Aviso para la ingesta:** el `MAPEO_COLUMNAS` de `src/ingest/egif.py` no reconoce `detectado`, `extinguido`, `coordenadax/y` ni `superficietotalforestal`; Silver los resuelve con sus propios alias.
+- **Consecuencias:** `informes/incendios_asignacion_a_revisar.csv` identifica (por `id_evento`) los casos dudosos por si Gold quiere excluirlos. **Pendiente:** completar la validación manual de `incendios_muestra_validacion.csv`. **Aviso para la ingesta:** el `MAPEO_COLUMNAS` de `src/ingest/egif.py` no reconoce `detectado`, `extinguido`, `coordenadax/y` ni `superficietotalforestal`; Silver los resuelve con sus propios alias.
 
 ### DEC-36. Controles de calidad y validación de Silver
 
 - **Fecha:** 2026-10-24 · **Estado:** Aceptada
 - **Responsable:** Guillermo · **Issue/PR:** feat/capa-silver
 - **Decisión:** Silver comprueba duplicados de clave, cobertura y rangos físicos (temperatura −30/50 °C, humedad 0–100 %, precipitación 0–500 mm, FFMC 0–101, índices FWI ≥ 0…, ver `src/silver/calidad.py`). Los valores fuera de rango **se ponen a nulo y se registran** en `valores_fuera_rango.csv`; no se corrigen ni se imputan.
-- **Validación de las tablas generadas:** `src/silver/validacion.py` comprueba las tablas de `data/silver` contra el modelo de datos (esquema y tipos, claves primarias y su formato, claves foráneas, 313 municipios por provincia, serie diaria completa, estación fija, rangos y ≥ 95 % de partes con código INE desde 2001, HU-04). Se ejecuta al final de `python -m src.silver` y de la etapa `silver` de `run_pipeline.py`; si hay **errores**, la etapa falla y no se sube nada a Hugging Face. Los **avisos** (p. ej. `reservado` sin definir o días sin FWI) no la detienen. Resultado en `informes/validacion.json`.
+- **Validación de las tablas generadas:** `src/silver/validacion.py` comprueba las tablas de `data/silver` contra el modelo de datos (exactamente sus columnas, tipos, claves primarias y su formato, claves foráneas, 313 municipios por provincia, serie diaria completa, estación fija, rangos y ≥ 95 % de partes con código INE desde 2001, HU-04). Se ejecuta al final de `python -m src.silver` y de la etapa `silver` de `run_pipeline.py`; si hay **errores**, la etapa falla y no se sube nada a Hugging Face. Los **avisos** (p. ej. `reservado` sin definir o días sin FWI) no la detienen. Resultado en `informes/validacion.json`.
 - **Alternativas descartadas:** validar sólo con tests de pytest, porque no ven los datos reales de cada ejecución.
-- **Consecuencias:** el tratamiento de faltantes queda para Gold/ML, documentado en «Decisiones pendientes». Con los datos actuales: 102 comprobaciones, 0 errores y 2 avisos. Los tests de pytest (105, en GitHub Actions en cada PR) cubren la lógica con datos sintéticos y comprueban que el validador detecta tablas defectuosas.
+- **Consecuencias:** el tratamiento de faltantes queda para Gold/ML, documentado en «Decisiones pendientes». Con los datos actuales: 89 comprobaciones, 0 errores y 2 avisos. Los tests de pytest (en GitHub Actions en cada PR) cubren la lógica con datos sintéticos y comprueban que el validador detecta tablas defectuosas.
 
 ---
 
