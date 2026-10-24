@@ -14,3 +14,12 @@ def bronze(tmp_path):
     d = tmp_path / "bronze"
     d.mkdir()
     return d
+
+
+#ML
+from tests.toy_data import make_toy_gold
+
+
+@pytest.fixture(scope="session")
+def toy_gold():
+    return make_toy_gold()
