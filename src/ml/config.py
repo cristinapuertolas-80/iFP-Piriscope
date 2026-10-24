@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 GOLD_DIR = ROOT / "data" / "gold"
 MODELS_DIR = ROOT / "models"
 RESERVADOS_CSV = ROOT / "docs" / "municipios_reservados.csv"
+PREDICCIONES_PARQUET = GOLD_DIR / "predicciones.parquet"
 
 # --- Columnas ---------------------------------------------------------------
 TARGET = "incendio_d1"
@@ -31,6 +32,9 @@ PART_TRAIN = "entrenamiento"
 PART_VAL = "validacion"
 PART_TEST = "test"
 PARTICIONES = (PART_TRAIN, PART_VAL, PART_TEST)
+
+# Niveles de riesgo, de menor a mayor
+RISK_LEVELS = ("bajo", "medio", "alto")
 
 # --- Grupos de variables ----------------------------------------------------
 METEO_FEATURES = ["temperatura", "humedad_relativa", "viento", "precipitacion"]
