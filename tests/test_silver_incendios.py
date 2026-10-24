@@ -24,6 +24,7 @@ def test_tipar_fechas_numeros_y_columnas_de_la_exportacion():
     assert fila["superficie_forestal_ha"] == 1.5
     assert fila["campana"] == 2020 and fila["huso"] == 29 and fila["datum"] == "ETRS89"
     assert fila["coordenada_x"] == CENTRO["15001"][0]
+    assert fila["causa"] == "[400] Intencionado"  # formato de EGIF sin el espacio doble
 
 
 def test_tipar_huecos_como_nulos():

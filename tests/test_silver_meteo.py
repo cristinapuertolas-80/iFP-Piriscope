@@ -48,6 +48,16 @@ def test_leer_diarios_filtra_por_rango(tmp_path):
     assert obs["temperatura"].tolist() == [2.0]
 
 
+def test_nombre_propio_de_estacion():
+    assert meteo.nombre_propio("SANTIAGO DE COMPOSTELA AEROPUERTO") == "Santiago de Compostela Aeropuerto"
+    assert meteo.nombre_propio("O BARCO DE VALDEORRAS") == "O Barco de Valdeorras"
+    assert meteo.nombre_propio("OURENSE,INSTITUTO") == "Ourense, Instituto"
+    assert meteo.nombre_propio("ROIS, CASAS DO PORTO") == "Rois, Casas do Porto"
+    assert meteo.nombre_propio("RODEIRO-VILAMAIOR") == "Rodeiro-Vilamaior"
+    assert meteo.nombre_propio("A CORUÑA  BENS ") == "A Coruña Bens"
+    assert pd.isna(meteo.nombre_propio(None))
+
+
 def test_leer_estaciones_tipa_coordenadas(tmp_path):
     escribir_aemet(tmp_path / "aemet" / "20260101T000000Z", {}, ESTACIONES)
     est = meteo.leer_estaciones(tmp_path, tmp_path / "nada")

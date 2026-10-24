@@ -70,6 +70,11 @@ def test_detecta_columnas_fuera_del_modelo(silver):
     assert "sin_columnas_fuera_del_modelo" in _fallidas(validacion.validar(silver))
 
 
+def test_detecta_textos_con_espacios_sobrantes(silver):
+    _corromper(silver, "estacion_aemet", lambda df: df.assign(nombre=" Cerca  de A Coruña"))
+    assert "textos_limpios" in _fallidas(validacion.validar(silver))
+
+
 def test_detecta_tabla_ausente(silver):
     (silver / "estacion_aemet.parquet").unlink()
     assert "existe" in _fallidas(validacion.validar(silver))

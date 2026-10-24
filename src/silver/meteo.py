@@ -7,6 +7,8 @@
 2. Se tipan las cuatro variables del Anexo A (temperatura, humedad relativa,
    viento y precipitación): coma decimal, ``Ip`` (precipitación inapreciable,
    < 0,1 mm) = 0,0, ``Acum``/``Varias`` = nulo.
+   El nombre de la estación pasa de mayúsculas a mayúscula inicial
+   (``'Santiago de Compostela Aeropuerto'``), como el del municipio.
 3. Cada municipio se asocia a **su estación más cercana** (distancia del
    centroide a la estación, DEC-08), elegida entre las estaciones con datos; la
    asignación es fija para todo el periodo y ``dist_estacion_km`` queda como
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import date
 from pathlib import Path
 
@@ -107,6 +110,27 @@ def leer_diarios(bronze_dir: Path | None = None, hf_dir: Path | None = None,
     return obs.reset_index(drop=True)
 
 
+#: Palabras que van en minúscula dentro de un nombre propio (salvo al principio o tras coma/guion).
+_PARTICULAS = {"a", "o", "as", "os", "de", "del", "da", "do", "das", "dos", "el", "la", "los", "las", "y", "e"}
+
+
+def nombre_propio(nombre: object) -> object:
+    """'SANTIAGO DE COMPOSTELA AEROPUERTO' -> 'Santiago de Compostela Aeropuerto';
+    'OURENSE,INSTITUTO' -> 'Ourense, Instituto'. No añade ni quita tildes."""
+    if nombre is None or nombre is pd.NA or (isinstance(nombre, float) and pd.isna(nombre)):
+        return nombre
+    texto = re.sub(r"\s*,\s*", ", ", re.sub(r"\s+", " ", str(nombre))).strip()
+    partes = re.split(r"([ ,-]+)", texto.lower())
+    inicio = True
+    for i, parte in enumerate(partes):
+        if not parte or re.fullmatch(r"[ ,-]+", parte):
+            inicio = inicio or bool(re.search(r"[,-]", parte or ""))
+            continue
+        partes[i] = parte if (parte in _PARTICULAS and not inicio) else parte[:1].upper() + parte[1:]
+        inicio = False
+    return "".join(partes)
+
+
 def leer_estaciones(bronze_dir: Path | None = None, hf_dir: Path | None = None) -> pd.DataFrame:
     """Entidad EstacionAemet: unión de ``estaciones_galicia.csv`` de todas las ingestas
     (la más reciente prevalece si una estación cambia de datos)."""
@@ -123,7 +147,7 @@ def leer_estaciones(bronze_dir: Path | None = None, hf_dir: Path | None = None) 
             .drop_duplicates("indicativo", keep="last"))
     return pd.DataFrame({
         "id_estacion_aemet": df["indicativo"].astype("string").str.strip(),
-        "nombre": df["nombre"].astype("string").str.strip(),
+        "nombre": df["nombre"].map(nombre_propio).astype("string"),
         "latitud": pd.to_numeric(df["latitud_dec"], errors="coerce"),
         "longitud": pd.to_numeric(df["longitud_dec"], errors="coerce"),
         "altitud": a_numero(df["altitud"]),

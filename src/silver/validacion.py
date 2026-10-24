@@ -6,6 +6,8 @@ técnico) sobre las tablas **ya generadas**, no sobre el código:
 * esquema: exactamente las columnas del modelo de datos (``almacen.COLUMNAS``
   + ``fecha_insert``) y sus tipos (ids texto, ``fecha`` como fecha,
   ``fecha_insert`` en UTC);
+* textos limpios: sin espacios en los bordes, dobles ni duros, y sin cadenas
+  vacías (los vacíos son nulos);
 * claves primarias únicas y no nulas, con el formato documentado
   (``id_municipio`` de 5 cifras, ``id_obs_meteo = id_municipio_fecha``…);
 * claves foráneas: todo ``id_municipio`` existe en Municipio y todo
@@ -102,10 +104,21 @@ class Validador:
             self.comprobar(tabla, "fecha_insert_utc", "UTC" in tipos["fecha_insert"], tipos["fecha_insert"])
         df = almacen.leer(tabla, self.base_dir)
         self.comprobar(tabla, "no_vacia", len(df) > 0, "la tabla no tiene filas")
+        self.textos_limpios(tabla, df, [c for c, t in tipos.items() if t in ("string", "large_string")])
         if "fecha_insert" in df:
             self.comprobar(tabla, "fecha_insert_sin_nulos", df["fecha_insert"].notna().all(),
                            f"{int(df['fecha_insert'].isna().sum())} nulos")
         return df
+
+    def textos_limpios(self, tabla: str, df: pd.DataFrame, columnas: list[str]) -> None:
+        sucias = {}
+        for col in columnas:
+            valores = pd.Series(df[col].dropna().astype(str).unique())
+            mal = valores[(valores != valores.str.strip()) | valores.str.contains(r"\s\s|\xa0", regex=True)
+                          | (valores == "")]
+            if len(mal):
+                sucias[col] = mal.head(3).tolist()
+        self.comprobar(tabla, "textos_limpios", not sucias, f"espacios sobrantes o vacíos en {sucias}")
 
     def clave_primaria(self, tabla: str, df: pd.DataFrame) -> None:
         clave = CLAVES[tabla]

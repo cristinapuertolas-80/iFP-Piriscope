@@ -42,6 +42,8 @@ Cada tabla tiene **exactamente** las columnas del modelo de datos (apartado 7 y 
 
 Todas llevan `fecha_insert` (UTC). Los identificadores son texto; `fecha` se guarda como **fecha** (`date32`); `fecha_deteccion` y `fecha_extincion` conservan la hora del parte (Anexo A).
 
+**Textos:** sin espacios en los bordes, dobles ni duros; los vacíos (`""`, `-`) son nulos. Los nombres que se muestran conservan su forma oficial con mayúscula inicial: `municipio.nombre` es el del CNIG y `estacion_aemet.nombre` pasa de las mayúsculas de AEMET a mayúscula inicial (`Santiago de Compostela Aeropuerto`, `Ourense, Instituto`), sin añadir ni quitar tildes. `causa` mantiene el formato de EGIF sin el espacio doble (`[400] Intencionado`); el código se obtiene con `causa.str.extract(r"\[(\d+)\]")`. Para comparar nombres se usa una clave normalizada sólo en memoria (`municipios.normalizar_nombre`).
+
 > **Leer las tablas:** `pd.read_parquet` devuelve `fecha` como objetos `datetime.date`. Para trabajar con `datetime64` usa
 > `from src.silver.almacen import leer; df = leer("observacion_meteorologica")`.
 
@@ -88,6 +90,7 @@ python -m src.silver.validacion      # resultado en data/silver/informes/validac
 | Tipo | Qué comprueba |
 |---|---|
 | Esquema | Exactamente las columnas del modelo de datos (ni faltan ni sobran), ids como texto, `fecha` como fecha (`date32`), `fecha_insert` en UTC y sin nulos |
+| Textos | Ninguna columna de texto con espacios en los bordes, dobles o duros, ni cadenas vacías |
 | Claves primarias | Únicas y no nulas; `id_municipio` de 5 cifras; `id_obs_meteo` e `id_indicador_fwi` = `id_municipio_fecha`; una fila por municipio y día |
 | Claves foráneas | Todo `id_municipio` está en Municipio y todo `id_estacion_aemet` en EstacionAemet |
 | Municipio | 313 municipios (93/67/92/61 por provincia), provincia coherente con el código, centroides dentro de Galicia |
@@ -95,7 +98,7 @@ python -m src.silver.validacion      # resultado en data/silver/informes/validac
 | FWI | Los 313 municipios todos los días, rangos, días sin FWI |
 | Incendios | `id_evento` único, **≥ 95 % de partes con código INE desde 2001 (HU-04)**, extinción posterior a la detección, huso 29/30 |
 
-Cada comprobación es un **error** (la tabla no cumple el contrato) o un **aviso** (dato a revisar en el EDA). Con los datos actuales: 89 comprobaciones, 0 errores y 2 avisos (`reservado` aún sin definir y los nueve meses de FWI de 2002 que faltan).
+Cada comprobación es un **error** (la tabla no cumple el contrato) o un **aviso** (dato a revisar en el EDA). Con los datos actuales: 94 comprobaciones, 0 errores y 2 avisos (`reservado` aún sin definir y los nueve meses de FWI de 2002 que faltan).
 
 ## Resultados con los datos actuales
 
@@ -120,4 +123,4 @@ pytest tests/test_silver_*.py
 ```
 
 - Los tests de lógica usan un Bronze sintético (dos municipios, dos estaciones, un mes de FWI y unos pocos partes) y no necesitan red ni datos reales.
-- `test_silver_validacion.py` comprueba además que el validador detecta tablas defectuosas (claves duplicadas, valores fuera de rango, claves foráneas huérfanas, huecos, columnas fuera del modelo…) y, si existen las tablas reales en `data/silver`, que cumplen el contrato. En GitHub Actions no hay datos y ese test se omite.
+- `test_silver_validacion.py` comprueba además que el validador detecta tablas defectuosas (claves duplicadas, valores fuera de rango, claves foráneas huérfanas, huecos, columnas fuera del modelo, textos con espacios sobrantes…) y, si existen las tablas reales en `data/silver`, que cumplen el contrato. En GitHub Actions no hay datos y ese test se omite.

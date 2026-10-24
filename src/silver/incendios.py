@@ -6,7 +6,9 @@ Parte del ``egif_galicia_unificado.parquet`` de la última ingesta de EGIF
 1. Resuelve los nombres de columna de la exportación (``detectado``,
    ``extinguido``, ``coordenadax``…) a los del Anexo A y conserva sólo los
    campos necesarios (minimización, DEC-27).
-2. Tipa fechas (día/mes/año hora), números con coma decimal, huso y datum.
+2. Tipa fechas (día/mes/año hora), números con coma decimal, huso y datum, y
+   limpia los textos (``causa`` queda como ``'[400] Intencionado'``, formato de EGIF
+   sin espacios dobles).
 3. Asigna el **código INE vigente** (DEC-07):
 
    a. por nombre de municipio + provincia del parte, comparado con el catálogo
@@ -75,7 +77,8 @@ METODOS = ("nombre_validado", "nombre_coordenadas_discrepan", "nombre_sin_coorde
 # Tipado
 # ---------------------------------------------------------------------------
 def _texto(serie: pd.Series) -> pd.Series:
-    s = serie.astype("string").str.replace("\xa0", " ", regex=False).str.strip()
+    """Texto limpio: sin espacios duros, dobles ni en los bordes; vacíos -> nulo."""
+    s = serie.astype("string").str.replace(r"\s+", " ", regex=True).str.strip()
     return s.mask(s.isin(["", "-", "nan", "None"]))
 
 
