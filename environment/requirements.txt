@@ -11,5 +11,13 @@ xlrd>=2.0            # exportaciones .xls antiguas de EGIF
 cdsapi>=0.7.2        # FWI de EFFIS/Copernicus (Early Warning Data Store)
 huggingface_hub>=0.24
 
+# --- Machine Learning y explicabilidad ---
+numpy>=1.26
+scikit-learn>=1.4    # Random Forest, métricas (AUC-PR); joblib viene como dependencia
+joblib>=1.3          # serialización de modelos en models/
+xgboost>=2.0
+shap>=0.45           # explicabilidad (TreeExplainer)
+plotly>=5.18         # gráficos SHAP y mapa del dashboard
+
 # --- Pruebas ---
 pytest>=8
