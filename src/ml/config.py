@@ -18,6 +18,7 @@ GOLD_DIR = ROOT / "data" / "gold"
 MODELS_DIR = ROOT / "models"
 RESERVADOS_CSV = ROOT / "docs" / "municipios_reservados.csv"
 PREDICCIONES_PARQUET = GOLD_DIR / "predicciones.parquet"
+EXPLICACIONES_PARQUET = GOLD_DIR / "explicaciones.parquet"
 
 # --- Columnas ---------------------------------------------------------------
 TARGET = "incendio_d1"
