@@ -112,6 +112,8 @@ Cada comprobación es un **error** (la tabla no cumple el contrato) o un **aviso
 - Si un parte no indica el datum de sus coordenadas, se asume ED50.
 - El `MAPEO_COLUMNAS` de `src/ingest/egif.py` no reconoce `detectado`, `extinguido`, `coordenadax/y` ni `superficietotalforestal`; Silver los resuelve con sus propios alias (`ALIAS` en `incendios.py`).
 
+Las decisiones de diseño, con sus alternativas descartadas, están en [docs/decisiones.md](../../docs/decisiones.md) (DEC-32 a DEC-36).
+
 ## Tests
 
 ```bash
