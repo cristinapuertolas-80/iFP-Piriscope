@@ -46,6 +46,14 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 | [DEC-34](#dec-34-fwi-en-silver-celda-de-tierra-más-cercana-y-prioridad-del-consolidado) | FWI en Silver: celda de tierra más cercana | Datos | Aceptada |
 | [DEC-35](#dec-35-asignación-del-código-ine-a-los-partes-de-egif) | Asignación del código INE a los partes de EGIF | Datos | Aceptada |
 | [DEC-36](#dec-36-controles-de-calidad-y-validación-de-silver) | Controles de calidad y validación de Silver | Calidad | Aceptada |
+| [DEC-37](#dec-37-contrato-de-entrada-del-módulo-ml) | Contrato de entrada del módulo ML | Modelo de datos / Modelo | Aceptada |
+| [DEC-38](#dec-38-variantes-del-modelo-y-variables-permitidas) | Variantes del modelo y variables permitidas | Modelo | Aceptada |
+| [DEC-39](#dec-39-protocolo-de-entrenamiento) | Protocolo de entrenamiento | Modelo | Aceptada (hiperparámetros pendientes) |
+| [DEC-40](#dec-40-comparación-con-el-baseline-fwi) | Comparación con el baseline FWI | Evaluación | Aceptada (bootstrap provisional) |
+| [DEC-41](#dec-41-niveles-de-riesgo-por-recall-objetivo) | Niveles de riesgo por Recall objetivo | Modelo | Pendiente (valores provisionales) |
+| [DEC-42](#dec-42-inferencia-batch-d1-y-salidas-de-gold) | Inferencia batch D+1 y salidas de Gold | Arquitectura / Modelo | Aceptada |
+| [DEC-43](#dec-43-explicabilidad-shap-y-gráficos-desde-gold) | Explicabilidad SHAP y gráficos desde Gold | Modelo / UX | Aceptada |
+| [DEC-44](#dec-44-persistencia-y-versionado-de-modelos) | Persistencia y versionado de modelos | Arquitectura | Aceptada (alojamiento pendiente) |
 
 ---
 
@@ -395,6 +403,76 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 - **Alternativas descartadas:** validar sólo con tests de pytest, porque no ven los datos reales de cada ejecución.
 - **Consecuencias:** el tratamiento de faltantes queda para Gold/ML, documentado en «Decisiones pendientes». Con los datos actuales: 94 comprobaciones, 0 errores y 2 avisos. Los tests de pytest (en GitHub Actions en cada PR) cubren la lógica con datos sintéticos y comprueban que el validador detecta tablas defectuosas.
 
+### DEC-37. Contrato de entrada del módulo ML
+
+- **Fecha:** 2026-10-25 · **Estado:** Aceptada
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-explainability
+- **Contexto:** la capa Gold aún no existe, pero ML necesita fijar qué columnas y valores recibirá para desarrollarse y probarse en paralelo, a partir del Anexo A.
+- **Decisión:** el dataset de entrenamiento debe incluir `id_municipio`, `provincia`, `fecha`, `reservado` (0/1), `particion`, `incendio_d1` (0/1), las cuatro variables meteorológicas, las derivadas (`racha_dias_secos`, `precip_acum_7d`, `mes`) y el FWI con sus cinco componentes. `particion` solo admite `entrenamiento`, `validacion` y `test`, **sin tilde**. `mes` entra como entero 1-12, sin one-hot. Antes de entrenar se valida el esquema (columnas, valores permitidos, sin duplicados por municipio y día) y la integridad de las particiones (orden temporal estricto y ningún municipio reservado en entrenamiento).
+- **Alternativas descartadas:** `validación` con tilde (riesgo de problemas de codificación entre Parquet, CSV y Windows); one-hot del mes (los modelos de árboles no lo necesitan).
+- **Consecuencias:** Gold debe escribir exactamente esos nombres y valores; si cambian, se modifican las constantes de `src/ml/config.py`. Las variables definitivas siguen condicionadas al EDA, como indica el Anexo A.
+
+### DEC-38. Variantes del modelo y variables permitidas
+
+- **Fecha:** 2026-10-25 · **Estado:** Aceptada
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-explainability
+- **Contexto:** DEC-06 exige evaluar el modelo con y sin FWI, y DEC-25 fija las variables excluidas. Hace falta concretar qué conjuntos de variables se entrenan.
+- **Decisión:** tres variantes: `con_fwi` (meteorología, derivadas, FWI y sus componentes), `sin_fwi` (meteorología y derivadas) y `solo_meteo` (las cuatro variables meteorológicas, sin derivadas). La lista de columnas que nunca entran al modelo (identificadores, coordenadas, datos conocidos a posteriori, fechas, columnas de trazabilidad, `provincia`, `reservado`, `particion`, `dist_estacion_km` y el objetivo) está en `src/ml/config.py`, y un test comprueba que ninguna variante la incluye. `provincia` solo se usa para estratificar y desagregar métricas.
+- **Alternativas descartadas:** usar `provincia` como variable, para mantener un modelo basado en variables meteorológicas generalizables (DEC-25).
+- **Consecuencias:** `con_fwi` frente a `sin_fwi` mide el valor que añade el FWI, y `sin_fwi` frente a `solo_meteo`, el de las derivadas. `dist_estacion_km` sigue siendo indicador de calidad (DEC-25); si el EDA sugiere probarla como variable, se añade en `config.py`.
+
+### DEC-39. Protocolo de entrenamiento
+
+- **Fecha:** 2026-10-25 · **Estado:** Aceptada (hiperparámetros pendientes)
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-explainability
+- **Contexto:** DEC-17 y DEC-24 fijan los modelos y el tratamiento del desbalanceo, pero no el procedimiento concreto de entrenamiento.
+- **Decisión:** XGBoost y Random Forest se entrenan solo con filas `reservado = 0` y `particion = entrenamiento`. Desbalanceo: `scale_pos_weight` (negativos entre positivos) en XGBoost y `class_weight="balanced_subsample"` en Random Forest. El *early stopping* de XGBoost mide AUC-PR sobre la validación de municipios **no reservados**; el test y los municipios reservados no se usan nunca durante el entrenamiento. Semilla fija (42). Los hiperparámetros son valores por defecto razonables, sin ajustar.
+- **Alternativas descartadas:** *early stopping* sobre municipios reservados (contaminaría los escenarios B y C); técnicas de remuestreo (se valorarán cuando se conozca el desbalanceo real).
+- **Consecuencias:** el ajuste de hiperparámetros por AUC-PR sobre validación queda para cuando exista la capa Gold. DEC-17 y DEC-24 siguen pendientes de registrar el modelo final y la estrategia de balanceo.
+
+### DEC-40. Comparación con el baseline FWI
+
+- **Fecha:** 2026-10-25 · **Estado:** Aceptada (bootstrap provisional)
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-explainability
+- **Contexto:** DEC-23 y DEC-24 piden comparar modelo y FWI sobre los mismos datos, con Recall, AUC-PR e intervalos de confianza. El FWI no es una probabilidad, así que hay que decidir cómo medir el Recall.
+- **Decisión:** modelo y FWI se evalúan sobre **exactamente las mismas filas** (se descartan de ambos las filas sin FWI o sin probabilidad). El FWI se usa como puntuación continua. El AUC-PR es la métrica principal, porque no depende del umbral. El Recall se mide con un umbral **fijado en validación**, con el mismo Recall objetivo para ambos sistemas, nunca en el conjunto evaluado; así, la comparación en test se lee en Precision (falsas alarmas). Los intervalos se calculan por bootstrap sobre filas (500 remuestras, semilla fija), global y por provincia, en los tres escenarios.
+- **Alternativas descartadas:** umbral de 0,5 (sin sentido con una prevalencia tan baja); convertir el FWI en probabilidad (añade un modelo más); bootstrap por bloques (más correcto, pero más complejo).
+- **Consecuencias:** el bootstrap por filas ignora la correlación entre días y municipios vecinos, así que los intervalos son algo optimistas, sobre todo en B y C. Pendiente valorar bootstrap por bloques (municipio o comarca).
+
+### DEC-41. Niveles de riesgo por Recall objetivo
+
+- **Fecha:** 2026-10-25 · **Estado:** Pendiente (valores provisionales)
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-explainability
+- **Contexto:** DEC-04 define tres niveles con umbrales fijados en validación, pero no el criterio para elegirlos.
+- **Decisión:** los umbrales se fijan sobre la validación de municipios no reservados mediante Recall objetivo: **medio** = mayor umbral con Recall ≥ 0,8 y **alto** = mayor umbral con Recall ≥ 0,5. Se guardan junto al modelo (`<id>_umbrales.json`) y el código rechaza aplicar los umbrales de otro modelo.
+- **Alternativas descartadas:** cuantiles de probabilidad y cortes fijos (0,33 / 0,66), porque no tienen significado operativo con una prevalencia baja.
+- **Consecuencias:** «medio o superior» captura ≈80 % de los días con incendio de validación y «alto» ≈50 %, con menos falsas alarmas. Con muy pocos positivos, «medio» puede generar muchas alarmas; se revisará con la Precision real. Los porcentajes 0,8 y 0,5 se reajustan tras el EDA; hasta entonces DEC-04 sigue pendiente.
+
+### DEC-42. Inferencia batch D+1 y salidas de Gold
+
+- **Fecha:** 2026-10-25 · **Estado:** Aceptada
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-explainability
+- **Contexto:** DEC-12, DEC-14 y DEC-15 establecen que las predicciones se calculan en batch y se escriben en Gold con trazabilidad.
+- **Decisión:** para cada municipio con fila del día D se predice D+1 (`fecha_objetivo = D + 1`). `predicciones.parquet` contiene `id_prediccion`, `id_municipio`, `fecha_objetivo`, `version_modelo`, `probabilidad`, `nivel_riesgo`, `fwi` (copia del día D) y `fecha_insert`. `explicaciones.parquet` contiene `id_prediccion`, `variable` y `valor_shap`. Ambas escrituras sobrescriben las filas con el mismo `id_prediccion` y conservan el resto. Por defecto se predice el último día disponible, y se admite un rango de fechas. En producción se predicen todos los municipios, reservados incluidos.
+- **Consecuencias:** `version_modelo` (p. ej. `v1`) forma parte del id. Las variantes del modelo comparten versión y se distinguen en el nombre del fichero; en producción solo predice una, así que no hay colisión.
+
+### DEC-43. Explicabilidad SHAP y gráficos desde Gold
+
+- **Fecha:** 2026-10-25 · **Estado:** Aceptada
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-explainability
+- **Contexto:** DEC-18 elige SHAP y DEC-28 exige accesibilidad; HU-08 pide las 5 variables más influyentes y una vista global.
+- **Decisión:** `TreeExplainer` sobre la fila del día D de cada predicción. Se guardan las 5 variables de mayor |SHAP| por predicción y se calcula la importancia global (media de |SHAP|). Las unidades son **log-odds en XGBoost** y **probabilidad en Random Forest** (`shap_units`). Los gráficos (Plotly) se construyen a partir de las tablas de Gold, sin cargar el modelo, con paleta apta para daltonismo y el sentido de cada contribución (sube o baja el riesgo) también en texto.
+- **Alternativas descartadas:** guardar todas las variables (más volumen y poco valor en el dashboard); guardar el valor de cada variable, porque el esquema del Anexo A no tiene esa columna.
+- **Consecuencias:** con solo `explicaciones.parquet` el dashboard no puede mostrar «temperatura = 31 °C»; habría que cruzar con Gold o ampliar el esquema (a acordar con Frontend). Los valores en log-odds y en probabilidad no son comparables entre algoritmos.
+
+### DEC-44. Persistencia y versionado de modelos
+
+- **Fecha:** 2026-10-25 · **Estado:** Aceptada (alojamiento pendiente)
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-explainability
+- **Contexto:** DEC-11 y DEC-17 prevén modelos serializados y versionados en `models/`.
+- **Decisión:** cada modelo se guarda con `joblib` en `models/<versión>_<algoritmo>_<variante>.joblib`, junto a un `.json` con versión, semilla, variables, parámetros, número de filas y fecha de entrenamiento, y un `_umbrales.json` (DEC-41).
+- **Consecuencias:** los `.joblib` son pickles, así que solo se cargan ficheros generados por el propio proyecto. Los modelos de Random Forest pueden pesar mucho: pendiente decidir si `models/` se aloja en Hugging Face en vez de GitHub.
+
 ---
 
 ## Decisiones pendientes
@@ -402,14 +480,18 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 Se cerrarán durante la adquisición y el EDA y se registrarán como nuevas entradas o actualizando las existentes:
 
 - [ ] Periodo común disponible de AEMET, EGIF-MITECO y FWI, y volumen definitivo del dataset (carga 2001–actualidad, DEC-31).
-- [ ] División concreta de años de la partición temporal (DEC-21).
+- [ ] División concreta de años de la partición temporal (DEC-21): confirmar qué años de EGIF son definitivos (DEC-31 habla de 2021; Silver llega a 2023) antes de fijar el último año completo como test.
 - [ ] Lista de municipios reservados y criterio de bloque usado: comarca o estación (DEC-22).
 - [ ] Medidas diarias de temperatura, humedad y viento (media, máxima, mínima…).
-- [ ] Método de imputación de datos meteorológicos faltantes.
+- [ ] Método de imputación o descarte de variables meteorológicas con muchos faltantes.
 - [ ] Umbral de "precipitación relevante" para `racha_dias_secos`.
 - [ ] Formato definitivo de `id_evento` (¿se repite el número de parte entre provincias?) (DEC-14). La ingesta de EGIF lo detecta automáticamente y lo registra en `mapeo_columnas.json` (DEC-30).
 - [ ] Umbrales de los niveles bajo / medio / alto (DEC-04).
 - [ ] Modelo final (XGBoost o Random Forest), hiperparámetros y estrategia de balanceo (DEC-17, DEC-24).
+- [ ] Recall objetivo de los niveles de riesgo (0,8 y 0,5) y cierre de DEC-04 (DEC-41).
+- [ ] Bootstrap por bloques en lugar de por filas (DEC-40).
+- [ ] Alojamiento de los modelos serializados: GitHub u Hugging Face (DEC-44).
+- [ ] Valor de cada variable junto a su contribución SHAP en el dashboard: ampliar el esquema o cruzar con Gold (DEC-43).
 
 ---
 
