@@ -1,0 +1,7 @@
+id_provincia,municipio_egif,id_municipio,nombre_vigente,tipo,detalle
+15,OZA DOS RÍOS,15902,Oza-Cesuras,fusion,Fusionado con Cesuras en Oza-Cesuras (2013)
+15,CESURAS,15902,Oza-Cesuras,fusion,Fusionado con Oza dos Ríos en Oza-Cesuras (2013)
+36,CERDEDO,36902,Cerdedo-Cotobade,fusion,Fusionado con Cotobade en Cerdedo-Cotobade (2016)
+36,COTOBADE,36902,Cerdedo-Cotobade,fusion,Fusionado con Cerdedo en Cerdedo-Cotobade (2016)
+27,"POBLA DO BROLLÓN, A",27047,A Pobra do Brollón,denominacion,Forma castellanizada del nombre usada en EGIF
+15,BOQUEIXÓN-CASANOVA,15012,Boqueixón,denominacion,Nombre con el que EGIF registra Boqueixón
