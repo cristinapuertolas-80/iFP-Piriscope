@@ -56,6 +56,10 @@ def test_pipeline_completo(tmp_path):
         assert (informes / nombre).exists()
     import pandas as pd
 
+    fuera = pd.read_csv(informes / "valores_fuera_rango.csv")
+    assert fuera[["tabla", "clave", "columna"]].values.tolist() == [
+        ["observacion_estacion", "0001_2024-07-01", "humedad_relativa"]]
+
     celdas = pd.read_csv(informes / "asignacion_celdas_fwi.csv", dtype={"id_municipio": str})
     assert len(celdas) == 2 and celdas["dist_celda_km"].notna().all()
 

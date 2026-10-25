@@ -45,7 +45,10 @@ def etapa_meteo(municipio: pd.DataFrame, informe: calidad.Informe, desde: date |
     almacen.guardar(estaciones, "estacion_aemet", ordenar_por=["id_estacion_aemet"], base_dir=base_dir)
 
     obs = meteo.leer_diarios(desde=desde, hasta=hasta, **kw)
-    obs, anomalias = calidad.aplicar_rangos(obs, "observacion_estacion", "id_estacion_aemet")
+    # Clave estación_fecha para que valores_fuera_rango.csv identifique el día
+    obs["_clave"] = obs["id_estacion_aemet"] + "_" + obs["fecha"].dt.strftime("%Y-%m-%d")
+    obs, anomalias = calidad.aplicar_rangos(obs, "observacion_estacion", "_clave")
+    obs = obs.drop(columns="_clave")
     informe.anomalias(anomalias)
 
     asignacion = meteo.asignar_estaciones(municipio, estaciones, meteo.estaciones_con_datos(**kw))

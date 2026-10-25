@@ -71,7 +71,7 @@ Sólo las cuatro del Anexo A. Si el EDA elige otra medida diaria (p. ej. `tmax`)
 | Fichero | Para qué |
 |---|---|
 | `informe_calidad.json` | Resumen por tabla: filas, periodo, duplicados de clave, % de nulos, valores fuera de rango, % de partes con código INE… |
-| `valores_fuera_rango.csv` | Valores físicamente imposibles que se han puesto a nulo |
+| `valores_fuera_rango.csv` | Valores físicamente imposibles que se han puesto a nulo; `clave` identifica la fila (en la meteo, `estación_fecha`, p. ej. `1387_2020-05-14`) |
 | `asignacion_estaciones.csv` | Estación asignada a cada municipio y su distancia (sirve para la reserva por bloques, DEC-22) |
 | `asignacion_celdas_fwi.csv` | Celda FWI usada para cada municipio (`lat_celda`, `lon_celda`) y su distancia al centroide |
 | `cobertura_meteo_municipios.csv` | % de días con dato por municipio y variable (toda la tabla) |
