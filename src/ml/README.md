@@ -98,7 +98,7 @@ Las escrituras sobrescriben las filas con el mismo `id_prediccion` y conservan e
 
 ## Decisiones
 
-Registradas en [docs/decisiones.md](../../docs/decisiones.md), DEC-37 a DEC-44 (contrato de entrada, variantes, entrenamiento, comparación con el baseline, niveles de riesgo, inferencia, SHAP y persistencia de modelos).
+Registradas en [docs/decisiones.md](../../docs/decisiones.md), DEC-37 a DEC-45 (contrato de entrada, variantes, entrenamiento, comparación con el baseline, niveles de riesgo, inferencia, SHAP y persistencia de modelos).
 
 ## Limitaciones y pendientes
 
@@ -107,7 +107,7 @@ Registradas en [docs/decisiones.md](../../docs/decisiones.md), DEC-37 a DEC-44 (
 - El bootstrap remuestrea filas y ignora la correlación entre días y municipios vecinos: los intervalos son algo optimistas, sobre todo en B y C.
 - Silver informa de un 56 % de nulos en viento. XGBoost y Random Forest admiten nulos, pero la política de imputación se decide tras el EDA.
 - Los `.joblib` son pickles: solo cargar ficheros generados por el propio proyecto. Pendiente decidir si los modelos se alojan en Hugging Face.
-- `docs/municipios_reservados.csv` (lista de municipios reservados) y la integración en `run_pipeline.py` están pendientes.
+- Integración en `run_pipeline.py` pendiente.
 
 ## Tests
 
