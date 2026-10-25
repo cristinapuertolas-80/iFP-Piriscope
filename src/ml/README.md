@@ -14,6 +14,7 @@ Estima la **probabilidad de que un municipio registre al menos un parte de incen
 | `evaluate.py` | AUC-PR, Recall y Precision; umbral por Recall objetivo; bootstrap; tabla modelo vs baseline FWI |
 | `risk.py` | Umbrales de los niveles bajo, medio y alto, fijados sobre validación |
 | `predict.py` | Inferencia batch D+1 con el esquema de `Prediccion`; escritura de `predicciones.parquet` |
+| `reservados.py` | Selección reproducible de municipios reservados por bloques de estación, estratificada por provincia y frecuencia de incendios (`python -m src.ml.reservados`) |
 
 ## Contrato de entrada (tabla de entrenamiento de Gold)
 
