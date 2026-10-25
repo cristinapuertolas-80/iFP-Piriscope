@@ -70,7 +70,7 @@ Sólo las cuatro del Anexo A. Si el EDA elige otra medida diaria (p. ej. `tmax`)
 
 | Fichero | Para qué |
 |---|---|
-| `informe_calidad.json` | Resumen por tabla: filas, periodo, duplicados de clave, % de nulos, valores fuera de rango, % de partes con código INE… |
+| `informe_calidad.json` | Resumen por tabla: filas, periodo, duplicados de clave, % de nulos, valores fuera de rango, % de partes con código INE, municipios cuyo centroide cae fuera de su término… |
 | `valores_fuera_rango.csv` | Valores físicamente imposibles que se han puesto a nulo; `clave` identifica la fila (en la meteo, `estación_fecha`, p. ej. `1387_2020-05-14`) y `fecha` el día. Se escribe siempre, aunque quede vacío; con `--desde/--hasta` o `--tablas` sólo se sustituyen las filas de lo reprocesado |
 | `asignacion_estaciones.csv` | Estación asignada a cada municipio y su distancia (sirve para la reserva por bloques, DEC-22) |
 | `asignacion_celdas_fwi.csv` | Celda FWI usada para cada municipio (`lat_celda`, `lon_celda`) y su distancia al centroide |
@@ -125,6 +125,7 @@ Cada comprobación es un **error** (la tabla no cumple el contrato) o un **aviso
 - `reservado` queda nulo hasta que ML publique `docs/municipios_reservados.csv`.
 - Falta completar a mano la columna `validacion_manual` de `docs/incendios_muestra_validacion.csv` (HU-04).
 - Si un parte no indica el datum de sus coordenadas, se asume ED50.
+- El centroide es el geométrico (lo fija el NF2): en municipios muy cóncavos puede caer fuera de su término. Hoy sólo pasa en Barbadás (32008), a 66 m del límite; la lista está en `informe_calidad.json` → `municipio.centroides_fuera_del_municipio`. La comprobación `centroides_en_galicia` del validador sólo mira la caja de Galicia.
 - El `MAPEO_COLUMNAS` de `src/ingest/egif.py` no reconoce `detectado`, `extinguido`, `coordenadax/y` ni `superficietotalforestal`; Silver los resuelve con sus propios alias (`ALIAS` en `incendios.py`).
 
 Las decisiones de diseño, con sus alternativas descartadas, están en [docs/decisiones.md](../../docs/decisiones.md) (DEC-32 a DEC-36).

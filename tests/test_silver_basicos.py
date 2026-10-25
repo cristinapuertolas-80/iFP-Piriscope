@@ -139,6 +139,20 @@ def test_construir_municipios_con_centroide_y_provincia():
     assert str(limites.crs) == "EPSG:4326" and len(limites) == 2
 
 
+def test_centroides_fuera_detecta_municipios_concavos():
+    import shapely
+
+    municipio, limites = municipios_df()
+    assert municipios.centroides_fuera(municipio, limites) == []
+    # Una «C»: su centroide cae en el hueco, fuera del recinto
+    c = shapely.Polygon([(0, 0), (3, 0), (3, 1), (1, 1), (1, 2), (3, 2), (3, 3), (0, 3)])
+    limites.loc[limites["id_municipio"] == "15001", "geometry"] = shapely.affinity.translate(
+        shapely.affinity.scale(c, 0.01, 0.01, origin=(0, 0)), -8.4, 42.9)
+    m = municipio.copy()
+    m.loc[m["id_municipio"] == "15001", ["lon_centroide", "lat_centroide"]] = [-8.4 + 0.0125, 42.9 + 0.015]
+    assert municipios.centroides_fuera(m, limites) == ["15001"]
+
+
 def test_construir_municipios_con_reservados():
     from .silver_fixtures import recintos
 

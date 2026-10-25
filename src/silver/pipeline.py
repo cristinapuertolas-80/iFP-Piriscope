@@ -31,11 +31,12 @@ def _rango(df: pd.DataFrame, col: str) -> dict[str, str | None]:
     return {"desde": str(pd.Timestamp(df[col].min()).date()), "hasta": str(pd.Timestamp(df[col].max()).date())}
 
 
-def etapa_municipios(municipio: pd.DataFrame, informe: calidad.Informe, base_dir: Path | None) -> None:
+def etapa_municipios(municipio: pd.DataFrame, limites, informe: calidad.Informe, base_dir: Path | None) -> None:
     almacen.guardar(municipio, "municipio", ordenar_por=["id_municipio"], base_dir=base_dir)
     informe.tabla("municipio", filas=len(municipio),
                   duplicados=calidad.duplicados(municipio, "id_municipio"),
                   por_provincia=municipio["provincia"].value_counts().sort_index().to_dict(),
+                  centroides_fuera_del_municipio=municipios.centroides_fuera(municipio, limites),
                   reservado_definido=bool(municipio["reservado"].notna().all()))
 
 
@@ -134,7 +135,7 @@ def ejecutar(desde: date | None = None, hasta: date | None = None, tablas: list[
     municipio, limites = municipios.procesar(**kw)
     if "municipios" in tablas:
         log.info("=== Silver: municipios ===")
-        etapa_municipios(municipio, informe, base_dir)
+        etapa_municipios(municipio, limites, informe, base_dir)
     if "meteo" in tablas:
         log.info("=== Silver: meteorología AEMET ===")
         etapa_meteo(municipio, informe, desde, hasta, base_dir, **kw)

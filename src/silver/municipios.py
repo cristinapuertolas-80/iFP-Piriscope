@@ -129,6 +129,21 @@ def construir(ine: pd.DataFrame, recintos, reservados: pd.DataFrame | None = Non
     return municipio, limites
 
 
+def centroides_fuera(municipio: pd.DataFrame, limites) -> list[str]:
+    """Municipios cuyo centroide (DEC-09) cae fuera de su propio recinto.
+
+    En municipios muy cóncavos el centroide geométrico puede quedar fuera; se usa
+    igualmente (lo fija el NF2) y se informa para tenerlo en cuenta.
+    """
+    import geopandas as gpd
+
+    puntos = gpd.GeoSeries(gpd.points_from_xy(municipio["lon_centroide"], municipio["lat_centroide"]),
+                           crs=CRS_GEOGRAFICO).to_crs(limites.crs)
+    recintos = limites.set_index("id_municipio").geometry.reindex(municipio["id_municipio"])
+    dentro = recintos.reset_index(drop=True).contains(puntos)
+    return sorted(municipio.loc[~dentro.to_numpy(), "id_municipio"].tolist())
+
+
 def procesar(bronze_dir: Path | None = None, hf_dir: Path | None = None):
     """Lee la última ingesta INE/CNIG y construye (municipio, limites)."""
     ruta_ine = fuentes.exigir(fuentes.ultimo_fichero("ine_cnig", "ine/diccionario*.xlsx", bronze_dir, hf_dir),
