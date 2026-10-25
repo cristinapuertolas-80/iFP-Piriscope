@@ -1,0 +1,235 @@
+"""Entidades Silver **EstacionAemet** y **ObservacionMeteorologica** (HU-01, HU-04).
+
+1. Se leen todos los JSON de valores diarios de AEMET de Bronze. Si un mismo
+   día de una estación aparece en varias ingestas (tramos solapados, últimos 10
+   días del cron), prevalece la **ingesta más reciente**, porque AEMET publica
+   con retraso y corrige valores.
+2. Se tipan las cuatro variables del Anexo A (temperatura, humedad relativa,
+   viento y precipitación): coma decimal, ``Ip`` (precipitación inapreciable,
+   < 0,1 mm) = 0,0, ``Acum``/``Varias`` = nulo.
+   El nombre de la estación pasa de mayúsculas a mayúscula inicial
+   (``'Santiago de Compostela Aeropuerto'``), como el del municipio.
+3. Cada municipio se asocia a **su estación más cercana** (distancia del
+   centroide a la estación, DEC-08), elegida entre las estaciones con datos; la
+   asignación es fija para todo el periodo y ``dist_estacion_km`` queda como
+   indicador de calidad.
+4. ``ObservacionMeteorologica`` tiene una fila por municipio y día del periodo:
+   los días en que la estación asignada no tiene dato quedan con nulos (no se
+   imputa en Silver).
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+from datetime import date
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+from . import fuentes
+from .geo import mas_cercano
+
+log = logging.getLogger("piriscope.silver.meteo")
+
+ENCODINGS = ("ISO-8859-15", "utf-8", "latin-1")
+
+#: Campo de AEMET -> columna Silver (Anexo A). Medida diaria: media; unidades °C, %, m/s y mm.
+VARIABLES_AEMET: dict[str, str] = {
+    "tmed": "temperatura",
+    "hrMedia": "humedad_relativa",
+    "velmedia": "viento",
+    "prec": "precipitacion",
+}
+VARIABLES = list(VARIABLES_AEMET.values())
+
+
+# ---------------------------------------------------------------------------
+# Lectura y tipado
+# ---------------------------------------------------------------------------
+def decodificar(contenido: bytes) -> list[dict]:
+    for enc in ENCODINGS:
+        try:
+            datos = json.loads(contenido.decode(enc))
+            return datos if isinstance(datos, list) else []
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+    return []
+
+
+def a_numero(serie: pd.Series, inapreciable: float | None = None) -> pd.Series:
+    """'12,5' -> 12.5; 'Ip' -> ``inapreciable``; 'Acum', 'Varias', '' -> nulo."""
+    texto = serie.astype("string").str.strip().str.replace(",", ".", regex=False)
+    if inapreciable is not None:
+        texto = texto.mask((texto.str.lower() == "ip").fillna(False), str(inapreciable))
+    return pd.to_numeric(texto, errors="coerce").astype("Float64")
+
+
+def tipar_registros(registros: pd.DataFrame) -> pd.DataFrame:
+    out = pd.DataFrame({
+        "id_estacion_aemet": registros["indicativo"].astype("string").str.strip(),
+        "fecha": pd.to_datetime(registros["fecha"], errors="coerce").dt.normalize(),
+    })
+    for campo, col in VARIABLES_AEMET.items():
+        serie = registros[campo] if campo in registros.columns else pd.Series(pd.NA, index=registros.index)
+        out[col] = a_numero(serie, inapreciable=0.0 if campo == "prec" else None)
+    out["timestamp_ingesta"] = registros["timestamp_ingesta"].astype("string")
+    return out
+
+
+def leer_diarios(bronze_dir: Path | None = None, hf_dir: Path | None = None,
+                 desde: date | None = None, hasta: date | None = None) -> pd.DataFrame:
+    """Observaciones diarias por estación, tipadas y sin duplicados (estación, fecha)."""
+    lotes = []
+    for timestamp, ruta in fuentes.ficheros("aemet", "diarios/*.json", bronze_dir, hf_dir):
+        if desde or hasta:  # el nombre del tramo es <estacion>_<ini>_<fin>.json
+            partes = ruta.stem.rsplit("_", 2)
+            if len(partes) == 3:
+                ini, fin = partes[1], partes[2]
+                if (hasta and ini > hasta.isoformat()) or (desde and fin < desde.isoformat()):
+                    continue
+        registros = decodificar(ruta.read_bytes())
+        if registros:
+            df = pd.DataFrame(registros)
+            df["timestamp_ingesta"] = timestamp
+            lotes.append(df)
+    if not lotes:
+        raise FileNotFoundError("No hay valores diarios de AEMET en Bronze (diarios/*.json)")
+    obs = tipar_registros(pd.concat(lotes, ignore_index=True))
+    obs = obs.dropna(subset=["id_estacion_aemet", "fecha"])
+    n = len(obs)
+    obs = (obs.sort_values(["id_estacion_aemet", "fecha", "timestamp_ingesta"])
+              .drop_duplicates(["id_estacion_aemet", "fecha"], keep="last"))
+    log.info("AEMET: %d registros leídos, %d tras quitar repetidos entre ingestas", n, len(obs))
+    if desde:
+        obs = obs[obs["fecha"] >= pd.Timestamp(desde)]
+    if hasta:
+        obs = obs[obs["fecha"] <= pd.Timestamp(hasta)]
+    return obs.reset_index(drop=True)
+
+
+#: Palabras que van en minúscula dentro de un nombre propio (salvo al principio o tras coma/guion).
+_PARTICULAS = {"a", "o", "as", "os", "de", "del", "da", "do", "das", "dos", "el", "la", "los", "las", "y", "e"}
+
+
+def nombre_propio(nombre: object) -> object:
+    """'SANTIAGO DE COMPOSTELA AEROPUERTO' -> 'Santiago de Compostela Aeropuerto';
+    'OURENSE,INSTITUTO' -> 'Ourense, Instituto'. No añade ni quita tildes."""
+    if nombre is None or nombre is pd.NA or (isinstance(nombre, float) and pd.isna(nombre)):
+        return nombre
+    texto = re.sub(r"\s*,\s*", ", ", re.sub(r"\s+", " ", str(nombre))).strip()
+    partes = re.split(r"([ ,-]+)", texto.lower())
+    inicio = True
+    for i, parte in enumerate(partes):
+        if not parte or re.fullmatch(r"[ ,-]+", parte):
+            inicio = inicio or bool(re.search(r"[,-]", parte or ""))
+            continue
+        partes[i] = parte if (parte in _PARTICULAS and not inicio) else parte[:1].upper() + parte[1:]
+        inicio = False
+    return "".join(partes)
+
+
+def leer_estaciones(bronze_dir: Path | None = None, hf_dir: Path | None = None) -> pd.DataFrame:
+    """Entidad EstacionAemet: unión de ``estaciones_galicia.csv`` de todas las ingestas
+    (la más reciente prevalece si una estación cambia de datos)."""
+    lotes = []
+    for timestamp, ruta in fuentes.ficheros("aemet", "estaciones_galicia.csv", bronze_dir, hf_dir):
+        df = pd.read_csv(ruta, dtype=str)
+        if df.empty:
+            continue
+        df["timestamp_ingesta"] = timestamp
+        lotes.append(df)
+    if not lotes:
+        raise FileNotFoundError("No hay estaciones_galicia.csv de AEMET en Bronze")
+    df = (pd.concat(lotes, ignore_index=True).sort_values("timestamp_ingesta")
+            .drop_duplicates("indicativo", keep="last"))
+    return pd.DataFrame({
+        "id_estacion_aemet": df["indicativo"].astype("string").str.strip(),
+        "nombre": df["nombre"].map(nombre_propio).astype("string"),
+        "latitud": pd.to_numeric(df["latitud_dec"], errors="coerce"),
+        "longitud": pd.to_numeric(df["longitud_dec"], errors="coerce"),
+        "altitud": a_numero(df["altitud"]),
+    }).sort_values("id_estacion_aemet").reset_index(drop=True)
+
+
+def estaciones_con_datos(bronze_dir: Path | None = None, hf_dir: Path | None = None) -> set[str]:
+    """Estaciones con al menos un día de datos en alguna ingesta (``cobertura_estaciones.csv``).
+
+    No depende del rango que se reprocese, así que la asignación
+    municipio-estación es la misma en todas las ejecuciones.
+    """
+    con_datos: set[str] = set()
+    for _, ruta in fuentes.ficheros("aemet", "cobertura_estaciones.csv", bronze_dir, hf_dir):
+        df = pd.read_csv(ruta, dtype={"indicativo": str})
+        if {"indicativo", "dias_con_datos"} <= set(df.columns):
+            con_datos |= set(df.loc[df["dias_con_datos"] > 0, "indicativo"].str.strip())
+    return con_datos
+
+
+# ---------------------------------------------------------------------------
+# Cruce espacial y temporal
+# ---------------------------------------------------------------------------
+def asignar_estaciones(municipios: pd.DataFrame, estaciones: pd.DataFrame,
+                       con_datos: set[str] | None = None) -> pd.DataFrame:
+    """Estación AEMET más cercana al centroide de cada municipio (DEC-08)."""
+    candidatas = estaciones.dropna(subset=["latitud", "longitud"])
+    if con_datos is not None:
+        candidatas = candidatas[candidatas["id_estacion_aemet"].isin(con_datos)]
+    if candidatas.empty:
+        raise ValueError("No hay estaciones AEMET con coordenadas y datos para asignar")
+    idx, dist = mas_cercano(municipios["lat_centroide"].to_numpy(), municipios["lon_centroide"].to_numpy(),
+                            candidatas["latitud"].to_numpy(), candidatas["longitud"].to_numpy())
+    return pd.DataFrame({
+        "id_municipio": municipios["id_municipio"].to_numpy(),
+        "id_estacion_aemet": candidatas["id_estacion_aemet"].to_numpy()[idx],
+        "dist_estacion_km": np.round(dist, 3),
+    })
+
+
+def observacion_meteorologica(municipios: pd.DataFrame, asignacion: pd.DataFrame,
+                              obs: pd.DataFrame, desde: date | None = None,
+                              hasta: date | None = None) -> pd.DataFrame:
+    """Una fila por municipio y día de ``[desde, hasta]`` con la meteo de su estación."""
+    ini = pd.Timestamp(desde) if desde else obs["fecha"].min()
+    fin = pd.Timestamp(hasta) if hasta else obs["fecha"].max()
+    fechas = pd.date_range(ini, fin, freq="D")
+    rejilla = pd.MultiIndex.from_product([municipios["id_municipio"], fechas],
+                                         names=["id_municipio", "fecha"]).to_frame(index=False)
+    rejilla = rejilla.merge(asignacion, on="id_municipio", how="left")
+    df = rejilla.merge(obs[["id_estacion_aemet", "fecha", *VARIABLES]],
+                       on=["id_estacion_aemet", "fecha"], how="left")
+    df.insert(0, "id_obs_meteo", df["id_municipio"] + "_" + df["fecha"].dt.strftime("%Y-%m-%d"))
+    df["id_municipio"] = df["id_municipio"].astype("string")
+    df["id_obs_meteo"] = df["id_obs_meteo"].astype("string")
+    df["id_estacion_aemet"] = df["id_estacion_aemet"].astype("string")
+    return df
+
+
+COBERTURA = {"temperatura": "cobertura_temperatura_pct", "precipitacion": "cobertura_precipitacion_pct",
+             "humedad_relativa": "cobertura_humedad_pct", "viento": "cobertura_viento_pct"}
+
+
+def _cobertura(meteo: pd.DataFrame, por: list) -> pd.DataFrame:
+    g = meteo[VARIABLES].notna().groupby(por)
+    pct = (100 * g[list(COBERTURA)].mean()).round(2).rename(columns=COBERTURA)
+    return pd.concat([g.size().rename("dias"), pct], axis=1)
+
+
+def cobertura_municipios(meteo: pd.DataFrame) -> pd.DataFrame:
+    """% de días con dato de cada variable por municipio (informe de cobertura)."""
+    g = meteo.groupby("id_municipio")
+    estacion = g[["id_estacion_aemet", "dist_estacion_km"]].first()
+    return estacion.join(_cobertura(meteo, [meteo["id_municipio"]])).reset_index()
+
+
+def cobertura_municipios_anual(meteo: pd.DataFrame) -> pd.DataFrame:
+    """Como :func:`cobertura_municipios`, pero por municipio y año.
+
+    La estación es fija para todo el periodo (DEC-08), así que si empezó a
+    medir tarde sus municipios no tienen dato en los primeros años; el
+    porcentaje global lo diluye y aquí se ve año a año.
+    """
+    por = [meteo["id_municipio"], pd.to_datetime(meteo["fecha"]).dt.year.rename("anio")]
+    return _cobertura(meteo, por).reset_index()

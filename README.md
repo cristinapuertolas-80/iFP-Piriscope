@@ -73,7 +73,7 @@ Más detalle en la [documentación y diseño técnico](docs/NF2_Documentacion_y_
 
 ## ▶️ Cómo ejecutar
 
-> 🚧 **El proyecto está en desarrollo.** La **ingesta de datos** ya está implementada ([`src/ingest`](src/ingest/README.md)); los pasos marcados con ⏳ aún no lo están.
+> 🚧 **El proyecto está en desarrollo.** La **ingesta de datos** ([`src/ingest`](src/ingest/README.md)) y la **capa Silver** ([`src/silver`](src/silver/README.md)) ya están implementadas; los pasos marcados con ⏳ aún no lo están.
 
 ### 1. Requisitos previos
 
@@ -120,20 +120,33 @@ python run_pipeline.py --desde 2020-01-01 --hasta 2024-12-31 --etapas ingesta --
 
 La actualización periódica, **diaria para AEMET y semanal para el FWI**, la ejecuta el workflow [`.github/workflows/ingesta.yml`](.github/workflows/ingesta.yml), que necesita los Secrets `AEMET_API_KEY`, `HF_TOKEN` y, para el FWI, `CDSAPI_KEY`. Periodos, frecuencias y procedimiento completo: [docs/plan_ingesta.md](docs/plan_ingesta.md).
 
-### 5. Ejecutar el resto del pipeline y el modelo ⏳
+### 5. Capa Silver (limpieza, tipado y cruce espacio-temporal)
+
+```bash
+# Lee data/bronze (o los originales de Hugging Face con --descargar-hf) y escribe data/silver
+python -m src.silver --descargar-hf
+python -m src.silver --desde 2024-01-01 --hasta 2024-12-31   # reprocesa sólo ese periodo
+
+# O desde el orquestador
+python run_pipeline.py --desde 2001-01-01 --hasta 2024-12-31 --etapas silver
+```
+
+Tablas, cruce e informes de calidad: [src/silver/README.md](src/silver/README.md).
+
+### 6. Ejecutar el resto del pipeline y el modelo ⏳
 
 ```bash
 # Ingesta → Silver → Gold → entrenamiento/inferencia para un rango de fechas
 python run_pipeline.py --desde 2020-01-01 --hasta 2024-12-31
 ```
 
-### 6. Lanzar el dashboard ⏳
+### 7. Lanzar el dashboard ⏳
 
 ```bash
 streamlit run src/dashboard/app.py
 ```
 
-### 7. Ejecutar los tests
+### 8. Ejecutar los tests
 
 ```bash
 pytest
@@ -172,8 +185,9 @@ repo/
 │   └── decisiones.md                      # Registro de decisiones técnicas
 │
 ├── src/                                   # Código fuente
-│   ├── ingest/                            # Descarga e ingesta de las fuentes
-│   ├── features/                          # Limpieza, cruce y variables derivadas
+│   ├── ingest/                            # Descarga e ingesta de las fuentes (Bronze)
+│   ├── silver/                            # Limpieza, tipado y cruce espacio-temporal (Silver)
+│   ├── features/                          # Variables derivadas y dataset final (Gold)
 │   ├── ml/                                # Entrenamiento, evaluación e inferencia
 │   ├── explainability/                    # Explicaciones SHAP
 │   └── dashboard/                         # Aplicación Streamlit

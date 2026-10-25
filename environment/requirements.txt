@@ -11,6 +11,14 @@ xlrd>=2.0            # exportaciones .xls antiguas de EGIF
 cdsapi>=0.7.2        # FWI de EFFIS/Copernicus (Early Warning Data Store)
 huggingface_hub>=0.24
 
+# --- Capa Silver (cruce espacial y FWI) ---
+geopandas>=0.14      # recintos municipales del CNIG y cruce de los partes de EGIF
+shapely>=2.0
+pyproj>=3.6          # UTM (ETRS89 / ED50) -> WGS84
+pyogrio>=0.7         # lectura del GeoPackage del CNIG
+xarray>=2024.1       # NetCDF del FWI
+netCDF4>=1.6
+
 # --- Machine Learning y explicabilidad ---
 numpy>=1.26
 scikit-learn>=1.4    # Random Forest, métricas (AUC-PR); joblib viene como dependencia

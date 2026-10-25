@@ -41,6 +41,11 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 | [DEC-29](#dec-29-control-de-alcance-y-punto-de-control-s5s6) | Control de alcance y punto de control | Proceso | Aceptada |
 | [DEC-30](#dec-30-diseño-de-la-ingesta-en-bronze) | Diseño de la ingesta en Bronze | Datos / Arquitectura | Aceptada |
 | [DEC-31](#dec-31-periodo-y-frecuencias-de-ingesta) | Periodo y frecuencias de ingesta | Datos / Proceso | Aceptada (periodo pendiente del EDA) |
+| [DEC-32](#dec-32-diseño-de-la-capa-silver) | Diseño de la capa Silver | Datos / Arquitectura | Aceptada |
+| [DEC-33](#dec-33-meteorología-en-silver-estación-fija-y-huecos-nulos) | Meteorología en Silver: estación fija y huecos nulos | Datos | Aceptada |
+| [DEC-34](#dec-34-fwi-en-silver-celda-de-tierra-más-cercana-y-prioridad-del-consolidado) | FWI en Silver: celda de tierra más cercana | Datos | Aceptada |
+| [DEC-35](#dec-35-asignación-del-código-ine-a-los-partes-de-egif) | Asignación del código INE a los partes de EGIF | Datos | Aceptada |
+| [DEC-36](#dec-36-controles-de-calidad-y-validación-de-silver) | Controles de calidad y validación de Silver | Calidad | Aceptada |
 
 ---
 
@@ -322,6 +327,73 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
   - Carga inicial por años completos con `scripts/carga_inicial.sh` / `.ps1`, reanudable gracias a la caché de Bronze.
 - **Alternativas descartadas:** FWI diario (los últimos días aún no existen en ERA5); carga inicial desde GitHub Actions (el workflow se corta a las 2 horas y no conserva la caché).
 - **Consecuencias:** procedimiento detallado en [plan_ingesta.md](plan_ingesta.md). **Pendiente:** registrar el periodo común real tras la carga inicial y cerrar DEC-21.
+
+### DEC-32. Diseño de la capa Silver
+
+- **Fecha:** 2026-10-24 · **Estado:** Aceptada
+- **Responsable:** Guillermo (Data Engineering) · **Issue/PR:** feat/capa-silver
+- **Contexto:** HU-04 pide unir espacial y temporalmente meteorología, incendios y FWI a nivel municipio-día; el apartado 5.2 asigna a Silver la limpieza, el tipado, la conversión a Parquet, el cruce y los controles de calidad.
+- **Decisión:**
+  - Módulo propio `src/silver` (separado de Gold), CLI `python -m src.silver` y etapa `silver` de `run_pipeline.py`.
+  - Lee las ejecuciones de Bronze locales (`data/bronze/<fuente>/`) o su copia de Hugging Face (`data/hf/raw/<FUENTE>/`, `--descargar-hf`); si un timestamp está en ambas, prevalece la local.
+  - Una tabla Parquet por entidad Silver del modelo de datos (`municipio`, `estacion_aemet`, `observacion_meteorologica`, `evento_incendio`, `indicador_fwi`) y los informes de `data/silver/informes/`.
+  - Cada tabla tiene **exactamente las columnas del apartado 7 y el Anexo A** (`almacen.COLUMNAS`) más `fecha_insert`. Lo que el cruce calcula de más (celda FWI, origen consolidado/intermedio, método de asignación INE, nombre en EGIF…) va a `informes/`, no a las tablas; los polígonos municipales se leen de Bronze y no se guardan en Silver.
+  - Identificadores como texto, `fecha` como `date32`, `fecha_insert` en UTC. Con `--desde/--hasta` sólo se sustituye ese periodo (DEC-15).
+  - Textos sin espacios en los bordes, dobles ni duros y vacíos como nulo. Los nombres conservan su forma oficial con mayúscula inicial (no se pasan a minúsculas ni se quitan tildes); para comparar se usa una clave normalizada sólo en memoria. `nombre` del municipio es el del CNIG (orden natural, «A Cañiza»); el de la estación AEMET pasa de mayúsculas a mayúscula inicial («Santiago de Compostela Aeropuerto»). `reservado` se toma de `docs/municipios_reservados.csv` cuando ML lo publique; hasta entonces es nulo.
+  - El centroide municipal (DEC-08, DEC-09) es el centroide geométrico del recinto del CNIG, calculado en UTM 29N. En un municipio muy cóncavo puede caer fuera de su propio término: se usa igual, porque es lo que fija el NF2, y la lista de esos municipios se guarda en `informe_calidad.json` (`municipio.centroides_fuera_del_municipio`). Hoy sólo le pasa a Barbadás (32008), a 66 m del límite. Descartado `representative_point()`, que siempre cae dentro pero no es el centroide del NF2; la comprobación `centroides_en_galicia` del validador sólo mira la caja de Galicia.
+  - `--subir-hf` sube `data/silver` a `data/silver/` del dataset y borra allí las tablas e informes que ya no existen en local. Requiere un token *fine-grained* del dueño del dataset con escritura sobre él (un token *write* personal recibe 403).
+- **Alternativas descartadas:** `src/features` compartido con Gold, para trabajar en paralelo sin conflictos. Columnas extra de trazabilidad en las tablas (`nombre_ine`, `id_provincia`, celda FWI, `metodo_asignacion`…) y `municipio_limites.parquet`: no están en el modelo de datos y repetían valores fijos por municipio en millones de filas.
+- **Consecuencias:** Gold sólo necesita leer `data/silver` (o generarlo con `python -m src.silver --descargar-hf`). `pd.read_parquet` devuelve `fecha` como `datetime.date`; `src.silver.almacen.leer()` la devuelve como `datetime64`.
+
+### DEC-33. Meteorología en Silver: estación fija y huecos nulos
+
+- **Fecha:** 2026-10-24 · **Estado:** Aceptada
+- **Responsable:** Guillermo · **Issue/PR:** feat/capa-silver
+- **Contexto:** las 58 estaciones gallegas tienen huecos y no todas miden lo mismo; los tramos de AEMET se solapan entre ingestas.
+- **Decisión:**
+  - Aplicando DEC-08 tal cual: a cada municipio se le asigna **una única estación**, la más cercana a su centroide entre las que tienen algún dato (según `cobertura_estaciones.csv` de todas las ingestas, para que la asignación no cambie con el periodo reprocesado). Resultado: 56 estaciones usadas, distancia media 10,6 km y máxima 37,8 km (Negueira de Muñiz).
+  - `observacion_meteorologica` tiene una fila por municipio y día; los días sin dato de la estación asignada quedan **nulos** (no se imputa en Silver).
+  - Si un día de una estación aparece en varias ingestas, prevalece la **más reciente** (AEMET corrige con retraso).
+  - Tipado: coma decimal; `Ip` (inapreciable) = 0,0 mm; `Acum`/`Varias` = nulo.
+  - Sólo las cuatro variables del Anexo A, con la media diaria de AEMET: `temperatura` (`tmed`), `humedad_relativa` (`hrMedia`), `viento` (`velmedia`) y `precipitacion` (`prec`). Si el EDA elige otra medida, se cambia el campo de origen, no se añaden columnas.
+- **Alternativas descartadas:** estación más cercana con dato cada día (menos huecos, pero se aparta de DEC-08 y mezcla estaciones en una misma serie). Conservar máximas, mínimas, racha, dirección, insolación y presión hasta el EDA (no están en el Anexo A).
+- **Consecuencias:** con el histórico actual, ~18 % de días sin precipitación, ~17 % sin temperatura y ~56 % sin viento. La imputación queda pendiente para Gold/ML. Como la estación es fija, la de un municipio puede no tener dato en años enteros (172 municipios tienen algún año sin ninguna temperatura; en 39 de ellos el % global pasa del 80 %): `informes/cobertura_meteo_municipios_anual.csv` da la cobertura por municipio y año, y el validador avisa si cualquiera de las cuatro variables supera el 30 % de nulos (hoy, el viento).
+
+### DEC-34. FWI en Silver: celda de tierra más cercana y prioridad del consolidado
+
+- **Fecha:** 2026-10-24 · **Estado:** Aceptada
+- **Responsable:** Guillermo · **Issue/PR:** feat/capa-silver
+- **Contexto:** el FWI llega en rejilla de 0,25° con longitudes 0–360; las celdas de mar no tienen valor, y hay meses descargados del dataset intermedio y del consolidado.
+- **Decisión:** muestreo en el centroide (DEC-09) tomando la **celda con dato más cercana**; la celda y su distancia (media 9,2 km, máximo 16,9 km) van a `informes/asignacion_celdas_fwi.csv`. La celda se fija **una sola vez**, con el consolidado más reciente de todo Bronze (no del periodo reprocesado), igual que la estación fija de DEC-33: si una celda de tierra viniera vacía un mes, ese mes queda nulo (y se avisa en el log) en vez de cambiar de celda sin que se note. Para cada municipio y día prevalece el **consolidado** sobre el intermedio y, a igualdad, la ingesta más reciente; los meses que siguen siendo intermedios se listan en `informe_calidad.json` (`meses_intermedio`) para recargarlos.
+- **Alternativas descartadas:** interpolación bilineal o media zonal (DEC-09 ya las deja como mejora futura).
+- **Consecuencias:** en Bronze faltan nueve meses de 2002 (enero–agosto y noviembre); se listan en `informe_calidad.json` (`meses_sin_fichero`) y deben recargarse en la ingesta.
+
+### DEC-35. Asignación del código INE a los partes de EGIF
+
+- **Fecha:** 2026-10-24 · **Estado:** Aceptada
+- **Responsable:** Guillermo · **Issue/PR:** feat/capa-silver
+- **Contexto:** HU-04 exige que al menos el 95 % de los partes tenga código INE, con informe de no asignados, muestra de validación y tabla de equivalencias.
+- **Decisión:**
+  1. Nombre + provincia del parte contra el catálogo vigente (nombre del CNIG y del INE, normalizados: sin tildes y con el artículo antepuesto) y `docs/tabla_equivalencias.csv` (fusiones Oza-Cesuras 2013 y Cerdedo-Cotobade 2016, y variantes de nombre de EGIF).
+  2. Si no casa en su provincia, por nombre en el resto de Galicia cuando el nombre es único.
+  3. Validación con las coordenadas UTM cruzadas con los recintos del CNIG. Datum `ETRS89` si el parte lo indica; si viene vacío se asume **ED50**.
+  4. Si el nombre no casa pero las coordenadas caen en Galicia, se usa el municipio de las coordenadas.
+  - Si nombre y coordenadas discrepan, **prevalece el nombre**: las discrepancias están a una mediana de 27 km del municipio declarado, lo que apunta a errores de coordenadas y no a un problema de datum.
+  - `causa` conserva el formato de EGIF (código y texto) sin el espacio doble: «[400] Intencionado». Descartado guardar sólo el código con un catálogo aparte o reformatearlo («400 - Intencionado»): Silver limpia, no cambia la forma del dato.
+  - El método seguido se resume en `informe_calidad.json`; los partes con discrepancia o asignados sólo por coordenadas van a `informes/incendios_asignacion_a_revisar.csv`. La tabla `evento_incendio` sólo tiene las columnas del Anexo A.
+  - De la exportación sólo se conservan los campos necesarios (DEC-27); `motivacion` y similares no pasan a Silver.
+  - **Muestra de validación manual (50 partes):** se genera una sola vez con `python -m src.silver.muestra_validacion` en `docs/incendios_muestra_validacion.csv`, versionada en git y fuera del pipeline, para que no cambie con los datos ni se pierda lo anotado. Partes desde 2001 con coordenadas (semilla 42): 40 al azar, que estiman el acierto global, y 10 con discrepancia nombre/coordenadas, que se evalúan aparte. Descartado regenerarla en `informes/` en cada ejecución (se borraba la validación) y tomarla entre todos los partes (casi la mitad, anteriores a 2001 o sin coordenadas, no se podían comprobar en el mapa).
+- **Resultado (2001–2023):** 99,98 % de partes con código INE; 96,0 % validados por coordenadas, 3,5 % con discrepancia y 0,3 % sin coordenadas. Los no asignados son «PORTUGAL», «OTRA PROVINCIA» y municipios de León y Zamora. Antes de 1983 los partes figuran como «INDETERMINADO» sin coordenadas y quedan sin asignar.
+- **Consecuencias:** `informes/incendios_asignacion_a_revisar.csv` identifica (por `id_evento`) los casos dudosos por si Gold quiere excluirlos. **Pendiente:** completar la validación manual de `docs/incendios_muestra_validacion.csv` y anotar aquí el resultado por estrato. **Aviso para la ingesta:** el `MAPEO_COLUMNAS` de `src/ingest/egif.py` no reconoce `detectado`, `extinguido`, `coordenadax/y` ni `superficietotalforestal`; Silver los resuelve con sus propios alias.
+
+### DEC-36. Controles de calidad y validación de Silver
+
+- **Fecha:** 2026-10-24 · **Estado:** Aceptada
+- **Responsable:** Guillermo · **Issue/PR:** feat/capa-silver
+- **Decisión:** Silver comprueba duplicados de clave, cobertura y rangos físicos (temperatura −30/50 °C, humedad 0–100 %, precipitación 0–500 mm, FFMC 0–101, índices FWI ≥ 0…, ver `src/silver/calidad.py`). Los valores fuera de rango **se ponen a nulo y se registran** en `valores_fuera_rango.csv` (con su clave y fecha; el fichero se escribe siempre y una ejecución parcial sólo sustituye las filas de las tablas y el periodo reprocesados); no se corrigen ni se imputan.
+- **Validación de las tablas generadas:** `src/silver/validacion.py` comprueba las tablas de `data/silver` contra el modelo de datos (exactamente sus columnas, tipos, textos sin espacios sobrantes ni vacíos, claves primarias y su formato, claves foráneas, 313 municipios por provincia, serie diaria completa, estación fija, rangos y ≥ 95 % de partes con código INE desde 2001, HU-04). Se ejecuta al final de `python -m src.silver` y de la etapa `silver` de `run_pipeline.py`; si hay **errores**, la etapa falla y no se sube nada a Hugging Face. Los **avisos** (p. ej. `reservado` sin definir o días sin FWI) no la detienen. Resultado en `informes/validacion.json`.
+- **Alternativas descartadas:** validar sólo con tests de pytest, porque no ven los datos reales de cada ejecución.
+- **Consecuencias:** el tratamiento de faltantes queda para Gold/ML, documentado en «Decisiones pendientes». Con los datos actuales: 94 comprobaciones, 0 errores y 2 avisos. Los tests de pytest (en GitHub Actions en cada PR) cubren la lógica con datos sintéticos y comprueban que el validador detecta tablas defectuosas.
 
 ---
 
