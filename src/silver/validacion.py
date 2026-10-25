@@ -206,7 +206,7 @@ class Validador:
                        df["dist_estacion_km"].between(0, DIST_MAX_ESTACION_KM).all(),
                        f"máx {df['dist_estacion_km'].max():.1f} km (límite {DIST_MAX_ESTACION_KM})")
         self.rangos(t, df)
-        for col in ("temperatura", "precipitacion"):
+        for col in ("temperatura", "precipitacion", "humedad_relativa", "viento"):
             pct = 100 * df[col].isna().mean()
             self.comprobar(t, f"cobertura_{col}", pct <= 30, f"{pct:.1f} % nulos", nivel="aviso")
 

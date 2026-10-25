@@ -356,7 +356,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
   - Tipado: coma decimal; `Ip` (inapreciable) = 0,0 mm; `Acum`/`Varias` = nulo.
   - Sólo las cuatro variables del Anexo A, con la media diaria de AEMET: `temperatura` (`tmed`), `humedad_relativa` (`hrMedia`), `viento` (`velmedia`) y `precipitacion` (`prec`). Si el EDA elige otra medida, se cambia el campo de origen, no se añaden columnas.
 - **Alternativas descartadas:** estación más cercana con dato cada día (menos huecos, pero se aparta de DEC-08 y mezcla estaciones en una misma serie). Conservar máximas, mínimas, racha, dirección, insolación y presión hasta el EDA (no están en el Anexo A).
-- **Consecuencias:** con el histórico actual, ~18 % de días sin precipitación, ~17 % sin temperatura y ~56 % sin viento. La imputación queda pendiente para Gold/ML.
+- **Consecuencias:** con el histórico actual, ~18 % de días sin precipitación, ~17 % sin temperatura y ~56 % sin viento. La imputación queda pendiente para Gold/ML. Como la estación es fija, la de un municipio puede no tener dato en años enteros (172 municipios tienen algún año sin ninguna temperatura; en 39 de ellos el % global pasa del 80 %): `informes/cobertura_meteo_municipios_anual.csv` da la cobertura por municipio y año, y el validador avisa si cualquiera de las cuatro variables supera el 30 % de nulos (hoy, el viento).
 
 ### DEC-34. FWI en Silver: celda de tierra más cercana y prioridad del consolidado
 

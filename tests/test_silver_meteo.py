@@ -88,3 +88,18 @@ def test_observacion_meteorologica_una_fila_por_municipio_y_dia_con_huecos_nulos
     assert df["id_obs_meteo"].iloc[0] == "15001_2026-01-01"
     assert df.loc[df["fecha"] == "2026-01-02", "temperatura"].isna().all()  # no se imputa
     assert df["dist_estacion_km"].tolist() == [1.0] * 3 + [9.0] * 3
+
+
+def test_cobertura_anual_muestra_anios_sin_dato():
+    # Estación que empieza a medir en 2002: en el global sale un 50 %, pero 2001 está vacío
+    fechas = pd.to_datetime(["2001-06-01", "2001-06-02", "2002-06-01", "2002-06-02"])
+    df = pd.DataFrame({"id_municipio": "15001", "id_estacion_aemet": "0001", "dist_estacion_km": 1.0,
+                       "fecha": fechas, "temperatura": [None, None, 10.0, 11.0],
+                       "humedad_relativa": [None, None, 80.0, 81.0], "viento": None,
+                       "precipitacion": [None, None, 0.0, 1.0]})
+    glob = meteo.cobertura_municipios(df)
+    assert glob["cobertura_temperatura_pct"].tolist() == [50.0] and glob["dias"].tolist() == [4]
+    anual = meteo.cobertura_municipios_anual(df)
+    assert anual["anio"].tolist() == [2001, 2002]
+    assert anual["cobertura_temperatura_pct"].tolist() == [0.0, 100.0]
+    assert anual["cobertura_viento_pct"].tolist() == [0.0, 0.0]

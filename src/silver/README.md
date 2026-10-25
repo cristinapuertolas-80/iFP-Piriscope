@@ -74,7 +74,8 @@ Sólo las cuatro del Anexo A. Si el EDA elige otra medida diaria (p. ej. `tmax`)
 | `valores_fuera_rango.csv` | Valores físicamente imposibles que se han puesto a nulo |
 | `asignacion_estaciones.csv` | Estación asignada a cada municipio y su distancia (sirve para la reserva por bloques, DEC-22) |
 | `asignacion_celdas_fwi.csv` | Celda FWI usada para cada municipio (`lat_celda`, `lon_celda`) y su distancia al centroide |
-| `cobertura_meteo_municipios.csv` | % de días con dato por municipio y variable |
+| `cobertura_meteo_municipios.csv` | % de días con dato por municipio y variable (toda la tabla) |
+| `cobertura_meteo_municipios_anual.csv` | Lo mismo por municipio y año: muestra los años sin dato de estaciones que empezaron a medir tarde, que el % global diluye |
 | `incendios_no_asignados.csv` | Partes sin código INE agrupados por nombre (HU-04) |
 | `incendios_muestra_validacion.csv` | 50 partes al azar (semilla 42) para validar a mano; columna `validacion_manual` vacía (HU-04) |
 | `incendios_asignacion_por_campana.csv` | % de partes asignados por campaña y provincia |

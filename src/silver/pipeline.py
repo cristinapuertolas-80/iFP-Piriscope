@@ -57,8 +57,10 @@ def etapa_meteo(municipio: pd.DataFrame, informe: calidad.Informe, desde: date |
     obs_mun = meteo.observacion_meteorologica(municipio, asignacion, obs, desde, hasta)
     almacen.guardar(obs_mun, "observacion_meteorologica", "fecha", desde, hasta,
                     ordenar_por=["id_municipio", "fecha"], base_dir=base_dir)
-    cobertura = meteo.cobertura_municipios(obs_mun)
-    informe.csv("cobertura_meteo_municipios.csv", cobertura)
+    # Los informes de cobertura cubren toda la tabla, no sólo el periodo reprocesado
+    obs_tabla = almacen.leer("observacion_meteorologica", base_dir)
+    informe.csv("cobertura_meteo_municipios.csv", meteo.cobertura_municipios(obs_tabla))
+    informe.csv("cobertura_meteo_municipios_anual.csv", meteo.cobertura_municipios_anual(obs_tabla))
     informe.tabla("estacion_aemet", filas=len(estaciones),
                   duplicados=calidad.duplicados(estaciones, "id_estacion_aemet"),
                   estaciones_asignadas=int(asignacion["id_estacion_aemet"].nunique()))

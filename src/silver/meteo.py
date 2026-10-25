@@ -207,15 +207,29 @@ def observacion_meteorologica(municipios: pd.DataFrame, asignacion: pd.DataFrame
     return df
 
 
+COBERTURA = {"temperatura": "cobertura_temperatura_pct", "precipitacion": "cobertura_precipitacion_pct",
+             "humedad_relativa": "cobertura_humedad_pct", "viento": "cobertura_viento_pct"}
+
+
+def _cobertura(meteo: pd.DataFrame, por: list) -> pd.DataFrame:
+    g = meteo[VARIABLES].notna().groupby(por)
+    pct = (100 * g[list(COBERTURA)].mean()).round(2).rename(columns=COBERTURA)
+    return pd.concat([g.size().rename("dias"), pct], axis=1)
+
+
 def cobertura_municipios(meteo: pd.DataFrame) -> pd.DataFrame:
-    """% de días con temperatura y precipitación por municipio (informe de cobertura)."""
+    """% de días con dato de cada variable por municipio (informe de cobertura)."""
     g = meteo.groupby("id_municipio")
-    return pd.DataFrame({
-        "id_estacion_aemet": g["id_estacion_aemet"].first(),
-        "dist_estacion_km": g["dist_estacion_km"].first(),
-        "dias": g.size(),
-        "cobertura_temperatura_pct": (100 * g["temperatura"].apply(lambda s: s.notna().mean())).round(2),
-        "cobertura_precipitacion_pct": (100 * g["precipitacion"].apply(lambda s: s.notna().mean())).round(2),
-        "cobertura_humedad_pct": (100 * g["humedad_relativa"].apply(lambda s: s.notna().mean())).round(2),
-        "cobertura_viento_pct": (100 * g["viento"].apply(lambda s: s.notna().mean())).round(2),
-    }).reset_index()
+    estacion = g[["id_estacion_aemet", "dist_estacion_km"]].first()
+    return estacion.join(_cobertura(meteo, [meteo["id_municipio"]])).reset_index()
+
+
+def cobertura_municipios_anual(meteo: pd.DataFrame) -> pd.DataFrame:
+    """Como :func:`cobertura_municipios`, pero por municipio y año.
+
+    La estación es fija para todo el periodo (DEC-08), así que si empezó a
+    medir tarde sus municipios no tienen dato en los primeros años; el
+    porcentaje global lo diluye y aquí se ve año a año.
+    """
+    por = [meteo["id_municipio"], pd.to_datetime(meteo["fecha"]).dt.year.rename("anio")]
+    return _cobertura(meteo, por).reset_index()
