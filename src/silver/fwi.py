@@ -6,7 +6,9 @@
 * El FWI se **muestrea en el centroide** de cada municipio (DEC-09): se toma la
   celda de la rejilla (0,25°) más cercana al centroide entre las celdas con
   dato; las celdas de mar no tienen FWI, así que a un municipio costero se le
-  asigna la celda de tierra más próxima.
+  asigna la celda de tierra más próxima. La celda se fija **una vez** con el
+  fichero de referencia (:func:`fichero_referencia`) y es la misma para todo el
+  periodo: si un mes viniera vacía, ese mes queda nulo en vez de cambiar de celda.
 * Si un día está en varios ficheros, prevalece el **consolidado** sobre el
   intermedio y, a igualdad, la ingesta más reciente (DEC-31).
 
@@ -56,6 +58,17 @@ def inventario(bronze_dir: Path | None = None, hf_dir: Path | None = None) -> pd
                           "origen_fwi": "intermedio" if m.group(3) else "consolidado",
                           "timestamp_ingesta": timestamp, "ruta": ruta})
     return pd.DataFrame(filas, columns=["anio", "mes", "origen_fwi", "timestamp_ingesta", "ruta"])
+
+
+def fichero_referencia(inv: pd.DataFrame) -> Path:
+    """Fichero con el que se fijan las celdas: el consolidado más reciente de todo Bronze.
+
+    Se elige sobre el inventario completo, no sobre el periodo reprocesado, para
+    que la asignación no dependa de ``desde``/``hasta``.
+    """
+    orden = inv.assign(_consolidado=(inv["origen_fwi"] == "consolidado").astype(int)).sort_values(
+        ["_consolidado", "anio", "mes", "timestamp_ingesta"])
+    return orden["ruta"].iloc[-1]
 
 
 def abrir(ruta: Path):
@@ -108,6 +121,13 @@ def procesar(municipios: pd.DataFrame, desde: date | None = None, hasta: date | 
     inv = inventario(bronze_dir, hf_dir)
     if inv.empty:
         raise FileNotFoundError("No hay ficheros de FWI en Bronze (fwi_AAAA_MM.nc)")
+    referencia = fichero_referencia(inv)
+    ds = abrir(referencia)
+    try:
+        celdas = celdas_municipios(ds, municipios)
+    finally:
+        ds.close()
+    log.info("FWI: celdas fijadas con %s", referencia.name)
     if desde:
         inv = inv[(inv["anio"] * 100 + inv["mes"]) >= desde.year * 100 + desde.month]
     if hasta:
@@ -118,10 +138,13 @@ def procesar(municipios: pd.DataFrame, desde: date | None = None, hasta: date | 
     for fila in inv.itertuples():
         ds = abrir(fila.ruta)
         try:
-            celdas = celdas_municipios(ds, municipios)
             df = muestrear(ds, celdas)
         finally:
             ds.close()
+        vacios = df.groupby("id_municipio")["fwi"].apply(lambda s: s.isna().all())
+        if vacios.any():
+            log.warning("FWI %s: %d municipios con su celda vacía todo el mes (quedan nulos)",
+                        fila.ruta.name, int(vacios.sum()))
         df = df.merge(celdas, on="id_municipio", how="left")
         df["origen_fwi"] = fila.origen_fwi
         df["timestamp_ingesta"] = fila.timestamp_ingesta
