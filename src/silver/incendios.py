@@ -248,18 +248,35 @@ def informe_no_asignados(eventos: pd.DataFrame) -> pd.DataFrame:
                .reset_index().sort_values("n_partes", ascending=False))
 
 
+ENLACE_MAPA = "https://www.google.com/maps/search/?api=1&query={lat:.5f},{lon:.5f}"
+
+
 def muestra_validacion(eventos: pd.DataFrame, municipios: pd.DataFrame, n: int = 50,
+                       n_discrepancias: int = 10, desde_campana: int = 2001,
                        semilla: int = 42) -> pd.DataFrame:
-    """Muestra aleatoria (con semilla) de partes asignados para validarla a mano (HU-04)."""
-    asignados = eventos[eventos["id_municipio"].notna()]
-    muestra = asignados.sample(min(n, len(asignados)), random_state=semilla)
+    """Muestra (con semilla) de partes asignados para validarla a mano (HU-04).
+
+    Sólo partes desde ``desde_campana`` (periodo del modelo) con coordenadas, para
+    poder comprobarlos en el mapa: ``n - n_discrepancias`` al azar (estrato
+    ``aleatoria``, estima el acierto global) y ``n_discrepancias`` en que nombre y
+    coordenadas no coinciden (estrato ``discrepancia``, los casos dudosos).
+    """
+    candidatos = eventos[eventos["id_municipio"].notna() & eventos["latitud"].notna()
+                         & (eventos["campana"] >= desde_campana)]
+    aleatoria = candidatos.sample(min(n - n_discrepancias, len(candidatos)), random_state=semilla)
+    resto = candidatos.drop(aleatoria.index)
+    resto = resto[resto["metodo_asignacion"] == "nombre_coordenadas_discrepan"]
+    discrepancia = resto.sample(min(n_discrepancias, len(resto)), random_state=semilla)
+    muestra = pd.concat([aleatoria.assign(estrato="aleatoria"), discrepancia.assign(estrato="discrepancia")])
     nombres = municipios.set_index("id_municipio")["nombre"]
-    muestra = muestra.assign(nombre_asignado=muestra["id_municipio"].map(nombres),
-                             nombre_coordenadas=muestra["id_municipio_coordenadas"].map(nombres),
-                             validacion_manual="")
-    return muestra[["id_evento", "municipio_egif", "id_provincia", "id_municipio", "nombre_asignado",
-                    "id_municipio_coordenadas", "nombre_coordenadas", "metodo_asignacion",
-                    "latitud", "longitud", "validacion_manual"]]
+    muestra = muestra.assign(
+        nombre_asignado=muestra["id_municipio"].map(nombres),
+        nombre_coordenadas=muestra["id_municipio_coordenadas"].map(nombres),
+        enlace_mapa=[ENLACE_MAPA.format(lat=la, lon=lo) for la, lo in zip(muestra["latitud"], muestra["longitud"])],
+        validacion_manual="", observaciones="")
+    return muestra[["estrato", "id_evento", "campana", "municipio_egif", "id_provincia", "id_municipio",
+                    "nombre_asignado", "id_municipio_coordenadas", "nombre_coordenadas", "metodo_asignacion",
+                    "latitud", "longitud", "enlace_mapa", "validacion_manual", "observaciones"]]
 
 
 def resumen_asignacion(eventos: pd.DataFrame) -> pd.DataFrame:

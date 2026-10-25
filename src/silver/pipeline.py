@@ -111,7 +111,6 @@ def etapa_incendios(municipio: pd.DataFrame, limites, informe: calidad.Informe, 
     almacen.guardar(df, "evento_incendio", "fecha_deteccion", desde, hasta,
                     ordenar_por=["fecha_deteccion", "id_evento"], base_dir=base_dir)
     informe.csv("incendios_no_asignados.csv", incendios.informe_no_asignados(df))
-    informe.csv("incendios_muestra_validacion.csv", incendios.muestra_validacion(df, municipio))
     informe.csv("incendios_asignacion_por_campana.csv", incendios.resumen_asignacion(df))
     informe.csv("incendios_asignacion_a_revisar.csv", incendios.asignacion_a_revisar(df, municipio))
     metodos = df["metodo_asignacion"].value_counts().to_dict()

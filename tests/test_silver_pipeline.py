@@ -50,7 +50,7 @@ def test_pipeline_completo(tmp_path):
     assert resumen["observacion_meteorologica"]["valores_fuera_rango"] == 1
     assert resumen["indicador_fwi"]["meses_intermedio"] == []
     for nombre in ("valores_fuera_rango.csv", "asignacion_estaciones.csv", "incendios_no_asignados.csv",
-                   "incendios_muestra_validacion.csv", "cobertura_meteo_municipios.csv",
+                   "cobertura_meteo_municipios.csv",
                    "cobertura_meteo_municipios_anual.csv",
                    "asignacion_celdas_fwi.csv", "incendios_asignacion_a_revisar.csv"):
         assert (informes / nombre).exists()

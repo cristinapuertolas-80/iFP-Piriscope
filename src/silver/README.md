@@ -77,9 +77,20 @@ Sólo las cuatro del Anexo A. Si el EDA elige otra medida diaria (p. ej. `tmax`)
 | `cobertura_meteo_municipios.csv` | % de días con dato por municipio y variable (toda la tabla) |
 | `cobertura_meteo_municipios_anual.csv` | Lo mismo por municipio y año: muestra los años sin dato de estaciones que empezaron a medir tarde, que el % global diluye |
 | `incendios_no_asignados.csv` | Partes sin código INE agrupados por nombre (HU-04) |
-| `incendios_muestra_validacion.csv` | 50 partes al azar (semilla 42) para validar a mano; columna `validacion_manual` vacía (HU-04) |
 | `incendios_asignacion_por_campana.csv` | % de partes asignados por campaña y provincia |
 | `incendios_asignacion_a_revisar.csv` | Partes en que nombre y coordenadas no coinciden o asignados sólo por coordenadas, con ambos municipios |
+
+## Validación manual de la asignación (HU-04)
+
+La muestra de 50 partes que pide HU-04 está en [`docs/incendios_muestra_validacion.csv`](../../docs/incendios_muestra_validacion.csv). Se generó **una sola vez** y se versiona en git: el pipeline no la toca, así que no cambia con los datos y lo anotado no se pierde.
+
+- Sólo partes desde 2001 (periodo del modelo) con coordenadas, con semilla 42: **40 al azar** (`estrato = aleatoria`, estiman el acierto global) y **10 en que nombre y coordenadas discrepan** (`estrato = discrepancia`, los casos dudosos). El % de acierto se calcula por estrato, sin mezclarlos.
+- Para cada parte, `enlace_mapa` abre el punto en Google Maps y se compara con `nombre_asignado` (y `nombre_coordenadas`).
+- En `validacion_manual` se anota `correcto`, `incorrecto` o `dudoso`, con el motivo en `observaciones`. El resultado se resume en DEC-35.
+
+```bash
+python -m src.silver.muestra_validacion   # sólo si docs/incendios_muestra_validacion.csv no existe; nunca lo sobrescribe
+```
 
 ## Validación de las tablas
 
@@ -100,7 +111,7 @@ python -m src.silver.validacion      # resultado en data/silver/informes/validac
 | FWI | Los 313 municipios todos los días, rangos, días sin FWI |
 | Incendios | `id_evento` único, **≥ 95 % de partes con código INE desde 2001 (HU-04)**, extinción posterior a la detección, huso 29/30 |
 
-Cada comprobación es un **error** (la tabla no cumple el contrato) o un **aviso** (dato a revisar en el EDA). Con los datos actuales: 94 comprobaciones, 0 errores y 2 avisos (`reservado` aún sin definir y los nueve meses de FWI de 2002 que faltan).
+Cada comprobación es un **error** (la tabla no cumple el contrato) o un **aviso** (dato a revisar en el EDA). Con los datos actuales: 96 comprobaciones, 0 errores y 3 avisos (`reservado` aún sin definir, el 56 % de días sin viento y los nueve meses de FWI de 2002 que faltan).
 
 ## Resultados con los datos actuales
 
@@ -112,7 +123,7 @@ Cada comprobación es un **error** (la tabla no cumple el contrato) o un **aviso
 
 - En Bronze faltan nueve meses de FWI de 2002 (enero–agosto y noviembre); aparecen en `informe_calidad.json` → `meses_sin_fichero` y hay que recargarlos en la ingesta.
 - `reservado` queda nulo hasta que ML publique `docs/municipios_reservados.csv`.
-- Falta completar a mano la columna `validacion_manual` de `incendios_muestra_validacion.csv` (HU-04).
+- Falta completar a mano la columna `validacion_manual` de `docs/incendios_muestra_validacion.csv` (HU-04).
 - Si un parte no indica el datum de sus coordenadas, se asume ED50.
 - El `MAPEO_COLUMNAS` de `src/ingest/egif.py` no reconoce `detectado`, `extinguido`, `coordenadax/y` ni `superficietotalforestal`; Silver los resuelve con sus propios alias (`ALIAS` en `incendios.py`).
 

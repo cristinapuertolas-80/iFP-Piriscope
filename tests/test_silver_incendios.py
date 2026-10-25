@@ -1,6 +1,7 @@
 """Tests de los incendios de EGIF en Silver: tipado y asignación del código INE."""
 
 import pandas as pd
+import pytest
 
 from src.silver import incendios
 
@@ -77,6 +78,7 @@ def test_informes_de_asignacion():
     assert no_asig[["municipio_egif", "n_partes"]].values.tolist() == [["PORTUGAL", 1]]
     muestra = incendios.muestra_validacion(df, municipio)
     assert muestra["nombre_asignado"].tolist() == ["Abegondo"]
+    assert muestra["enlace_mapa"].str.startswith("https://www.google.com/maps/").all()
     resumen = incendios.resumen_asignacion(df)
     assert resumen["pct_asignados"].tolist() == [50.0]
 
@@ -90,3 +92,25 @@ def test_asignacion_a_revisar_solo_discrepancias_y_por_coordenadas():
     revisar = incendios.asignacion_a_revisar(df, municipio)
     assert revisar["metodo_asignacion"].tolist() == ["nombre_coordenadas_discrepan", "coordenadas"]
     assert revisar["nombre_coordenadas"].tolist() == ["A Cañiza", "A Cañiza"]
+
+
+def test_muestra_validacion_desde_2001_con_coordenadas_y_discrepancias():
+    municipio, _ = municipios_df()
+    df = _asignar([parte("v1", "ABEGONDO", "01/07/2020 10:00:00", *CENTRO["15001"]),
+                   parte("v2", "ABEGONDO", "02/07/2020 10:00:00", *CENTRO["15001"]),
+                   parte("d1", "ABEGONDO", "03/07/2020 10:00:00", *CENTRO["15002"]),
+                   parte("sc", "ABEGONDO", "04/07/2020 10:00:00"),                    # sin coordenadas
+                   parte("an", "ABEGONDO", "01/07/1999 10:00:00", *CENTRO["15001"])])  # antes de 2001
+    muestra = incendios.muestra_validacion(df, municipio, n=3, n_discrepancias=1)
+    assert muestra[["estrato", "id_evento"]].values.tolist() == [
+        ["aleatoria", "v1"], ["aleatoria", "v2"], ["discrepancia", "d1"]]
+
+
+def test_muestra_no_sobrescribe_la_existente(tmp_path):
+    from src.silver import muestra_validacion
+
+    ruta = tmp_path / "muestra.csv"
+    ruta.write_text("id_evento,validacion_manual\nx,correcto\n")
+    with pytest.raises(FileExistsError):
+        muestra_validacion.generar(ruta)
+    assert "correcto" in ruta.read_text()
