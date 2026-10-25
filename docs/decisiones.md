@@ -476,21 +476,24 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 
 ### DEC-45. Selección de municipios reservados
 
-- **Fecha:** <fecha de generación de la lista> · **Estado:** Aceptada
-- **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-reserved-municipalities (script) y data/reserved-municipalities (lista)
+
+- **Fecha:** 2026-10-25 · **Estado:** Aceptada
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-reserved-municipalities
 - **Contexto:** DEC-24 exige una partición geográfica definida y congelada al inicio del proyecto, estratificada por provincia y frecuencia de incendios y hecha por bloques de municipios próximos (HU-06). Hace falta concretar qué es un bloque, cómo se estratifica, qué fracción se reserva, con qué años se mide la frecuencia y cómo se congela.
 - **Decisión:**
   - **Bloque:** los municipios que comparten la misma estación AEMET asignada (Silver no incluye la comarca). Un bloque se reserva entero o no se reserva.
   - **Estratos:** provincia (la mayoritaria del bloque) × tercil de frecuencia de incendios del bloque (baja, media, alta). La frecuencia es la tasa de días distintos con al menos un parte de EGIF (`evento_incendio`) entre 2001 y 2021, años anteriores a validación y test (a confirmar con DEC-21).
-  - **Selección:** se reserva ~20 % de los municipios de cada estrato, eligiendo bloques completos al azar con semilla 42 y evitando pasarse del objetivo.
-  - **Resultado:** <N> municipios reservados (<X> %) en <B> de <T> bloques, en `docs/municipios_reservados.csv` (`id_municipio`, `reservado = 1`). Los parámetros y los bloques elegidos quedan en `docs/municipios_reservados_meta.json`. Se reproduce con `python -m src.ml.reservados`.
+  - **Selección:** objetivo del 20 % por estrato, eligiendo bloques completos al azar con semilla 42. Como cada estrato reserva al menos un bloque entero, el resultado real supera el objetivo. Los parámetros (fracción 0,20, años 2001-2021, semilla 42) son los valores por defecto del script y se fijaron antes de ver resultados.
+  - **Resultado:** 81 municipios reservados (25,9 %) en 18 de 56 bloques: A Coruña 19 de 93 (20,4 %), Lugo 19 de 67 (28,4 %), Ourense 27 de 92 (29,3 %) y Pontevedra 16 de 61 (26,2 %). Días con incendio por municipio entre 2001 y 2021: 225,3 en los reservados y 250,2 en el resto (cociente 0,90). Lista en `docs/municipios_reservados.csv`; parámetros y bloques en `docs/municipios_reservados_meta.json`.
   - **Congelación:** la lista no se modifica durante el proyecto. El script se niega a sobrescribirla sin `--forzar`, y los años, la fracción y la semilla no se cambian tras ver resultados.
 - **Alternativas descartadas:** reservar municipios sueltos al azar (los vecinos comparten clima y los resultados saldrían optimistas); reservar por comarca (no está en Silver; se valorará si se incorpora esa tabla); reservar provincias enteras (queda para la validación opcional leave-one-province-out).
+  - Se probó también una fracción de 0,12 (el resultado fue 21,1 % con A Coruña en el 10,8 %), y se descartó por dejar esa provincia infrarrepresentada.
 - **Consecuencias:**
   - Reservar por estación es una aproximación: un municipio vecino atendido por otra estación puede quedar en entrenamiento, así que los escenarios B y C pueden salir algo optimistas.
   - Con ~20 % de municipios, B y C tienen pocos días con incendio: los intervalos de confianza serán amplios (DEC-40).
   - Al regenerar Silver con esta lista, `municipio.reservado` deja de ser nulo y desaparece el aviso del validador.
   - Cambiar cualquier parámetro daría otra lista y obligaría a reentrenar y reevaluar todo, así que requeriría una nueva decisión.
+  - El porcentaje reservado por provincia varía entre el 20 % y el 29 % por el tamaño de los bloques de estación; se tendrá en cuenta al interpretar las métricas por provincia en B y C.
 
 ---
 

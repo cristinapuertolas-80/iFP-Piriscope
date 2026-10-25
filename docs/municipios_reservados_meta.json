@@ -4,7 +4,7 @@
   "anio_desde": 2001,
   "anio_hasta": 2021,
   "criterio": "bloques = municipios con la misma estación AEMET asignada; estratos = provincia x tercil de frecuencia de días con incendio",
-  "generado_utc": "2026-10-25T18:23:11+00:00",
+  "generado_utc": "2026-10-25T18:37:08+00:00",
   "resumen": {
     "n_municipios": 313,
     "n_reservados": 81,
