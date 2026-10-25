@@ -65,6 +65,37 @@ def test_aplicar_rangos_pone_a_nulo_y_registra():
     assert anomalias[["clave", "columna", "valor"]].values.tolist() == [["b", "humedad_relativa", 120.0]]
 
 
+def _anomalias(tabla, fechas):
+    df = pd.DataFrame({"k": [f"0001_{f}" for f in fechas], "fecha": pd.to_datetime(fechas),
+                       "humedad_relativa": pd.array([150] * len(fechas), dtype="Float64")})
+    return calidad.aplicar_rangos(df, tabla, "k", "fecha")[1]
+
+
+def _fuera_rango(base):
+    return pd.read_csv(base / "informes" / "valores_fuera_rango.csv")[["tabla", "clave"]].values.tolist()
+
+
+def test_fuera_rango_sin_anomalias_no_deja_el_fichero_anterior(tmp_path):
+    i = calidad.Informe(tmp_path)
+    i.anomalias(_anomalias("obs", ["2024-07-01"]), "obs")
+    i.escribir()
+    j = calidad.Informe(tmp_path)
+    j.anomalias(_anomalias("obs", []), "obs")
+    j.escribir()
+    assert _fuera_rango(tmp_path) == []
+
+
+def test_fuera_rango_parcial_sustituye_solo_su_tabla_y_periodo(tmp_path):
+    i = calidad.Informe(tmp_path)
+    i.anomalias(_anomalias("obs", ["2023-07-01", "2024-07-01"]), "obs")
+    i.anomalias(_anomalias("fwi", ["2024-07-01"]), "fwi")
+    i.escribir()
+    j = calidad.Informe(tmp_path)  # reproceso de 2024 sólo de "obs", ya sin anomalías
+    j.anomalias(_anomalias("obs", []), "obs", date(2024, 1, 1), date(2024, 12, 31))
+    j.escribir()
+    assert _fuera_rango(tmp_path) == [["fwi", "0001_2024-07-01"], ["obs", "0001_2023-07-01"]]
+
+
 def test_informe_conserva_tablas_de_ejecuciones_previas(tmp_path):
     i = calidad.Informe(tmp_path)
     i.tabla("a", filas=1)
