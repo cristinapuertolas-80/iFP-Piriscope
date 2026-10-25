@@ -22,7 +22,8 @@ python -m src.silver --tablas meteo fwi
 # Desde el orquestador
 python run_pipeline.py --desde 2001-01-01 --hasta 2024-12-31 --etapas silver
 
-# Subir data/silver al dataset (HF_TOKEN con permiso de ESCRITURA); borra allí las tablas e informes que ya no existen
+# Subir data/silver al dataset (HF_TOKEN con permiso de ESCRITURA); borra allí las tablas e informes que ya no existen.
+# Siempre valida antes de subir: no se admite junto con --sin-validar
 python -m src.silver --subir-hf
 ```
 

@@ -86,3 +86,12 @@ def test_tablas_sin_municipios_requiere_bronze_de_municipios(tmp_path):
     with pytest.raises(FileNotFoundError):
         pipeline.ejecutar(tablas=["meteo"], base_dir=tmp_path / "silver", bronze_dir=tmp_path,
                           hf_dir=tmp_path)
+
+
+def test_cli_rechaza_subir_sin_validar(monkeypatch):
+    # subir_silver borra en HF lo que falte en local: no se puede subir sin validar
+    llamadas = []
+    monkeypatch.setattr("src.silver.pipeline.ejecutar", lambda *a, **k: llamadas.append("pipeline"))
+    monkeypatch.setattr("src.silver.hf_hub.subir_silver", lambda *a, **k: llamadas.append("subir"))
+    assert main(["--subir-hf", "--sin-validar"]) == 2
+    assert llamadas == []

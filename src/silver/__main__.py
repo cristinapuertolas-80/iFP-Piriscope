@@ -38,7 +38,7 @@ def construir_parser() -> argparse.ArgumentParser:
     p.add_argument("--subir-hf", action="store_true",
                    help="Subir data/silver al dataset (requiere HF_TOKEN con escritura)")
     p.add_argument("--sin-validar", action="store_true",
-                   help="No validar las tablas generadas contra el modelo de datos")
+                   help="No validar las tablas generadas contra el modelo de datos (incompatible con --subir-hf)")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
@@ -48,6 +48,10 @@ def main(argv: list[str] | None = None) -> int:
     configurar_logging(logging.DEBUG if args.verbose else logging.INFO)
     if args.desde and args.hasta and args.hasta < args.desde:
         log.error("--hasta debe ser posterior a --desde")
+        return 2
+    if args.subir_hf and args.sin_validar:
+        # subir_silver borra en HF lo que no esté en local: sólo se sube lo validado
+        log.error("--subir-hf exige validar las tablas; quita --sin-validar")
         return 2
     from . import hf_hub, pipeline, validacion
 
