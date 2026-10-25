@@ -14,9 +14,11 @@ SEED = 42
 
 # --- Rutas ------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parents[2]
+SILVER_DIR = ROOT / "data" / "silver"
 GOLD_DIR = ROOT / "data" / "gold"
 MODELS_DIR = ROOT / "models"
 RESERVADOS_CSV = ROOT / "docs" / "municipios_reservados.csv"
+RESERVADOS_META_JSON = ROOT / "docs" / "municipios_reservados_meta.json"
 PREDICCIONES_PARQUET = GOLD_DIR / "predicciones.parquet"
 EXPLICACIONES_PARQUET = GOLD_DIR / "explicaciones.parquet"
 
