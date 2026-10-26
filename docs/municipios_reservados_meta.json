@@ -1,0 +1,63 @@
+{
+  "semilla": 42,
+  "fraccion": 0.2,
+  "anio_desde": 2001,
+  "anio_hasta": 2021,
+  "criterio": "bloques = municipios con la misma estación AEMET asignada; estratos = provincia x tercil de frecuencia de días con incendio",
+  "generado_utc": "2026-10-25T18:37:08+00:00",
+  "resumen": {
+    "n_municipios": 313,
+    "n_reservados": 81,
+    "pct_reservados": 25.9,
+    "n_bloques": 56,
+    "n_bloques_reservados": 18,
+    "por_provincia": [
+      {
+        "provincia": "A Coruña",
+        "municipios": 93,
+        "reservados": 19,
+        "pct": 20.4
+      },
+      {
+        "provincia": "Lugo",
+        "municipios": 67,
+        "reservados": 19,
+        "pct": 28.4
+      },
+      {
+        "provincia": "Ourense",
+        "municipios": 92,
+        "reservados": 27,
+        "pct": 29.3
+      },
+      {
+        "provincia": "Pontevedra",
+        "municipios": 61,
+        "reservados": 16,
+        "pct": 26.2
+      }
+    ],
+    "dias_con_incendio_medios_reservados": 225.25,
+    "dias_con_incendio_medios_no_reservados": 250.17
+  },
+  "bloques_reservados": [
+    "1297E",
+    "1344X",
+    "1351",
+    "1387D",
+    "1393",
+    "1400",
+    "1406X",
+    "1437O",
+    "1446X",
+    "1465U",
+    "1468X",
+    "1473A",
+    "1476R",
+    "1486E",
+    "1489A",
+    "1690A",
+    "1706A",
+    "1738U"
+  ]
+}

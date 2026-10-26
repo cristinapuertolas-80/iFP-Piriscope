@@ -54,6 +54,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 | [DEC-42](#dec-42-inferencia-batch-d1-y-salidas-de-gold) | Inferencia batch D+1 y salidas de Gold | Arquitectura / Modelo | Aceptada |
 | [DEC-43](#dec-43-explicabilidad-shap-y-gráficos-desde-gold) | Explicabilidad SHAP y gráficos desde Gold | Modelo / UX | Aceptada |
 | [DEC-44](#dec-44-persistencia-y-versionado-de-modelos) | Persistencia y versionado de modelos | Arquitectura | Aceptada (alojamiento pendiente) |
+| [DEC-45](#dec-45-selección-de-municipios-reservados) | Selección de municipios reservados | Validación / Modelo | Aceptada |
 
 ---
 
@@ -473,6 +474,27 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 - **Decisión:** cada modelo se guarda con `joblib` en `models/<versión>_<algoritmo>_<variante>.joblib`, junto a un `.json` con versión, semilla, variables, parámetros, número de filas y fecha de entrenamiento, y un `_umbrales.json` (DEC-41).
 - **Consecuencias:** los `.joblib` son pickles, así que solo se cargan ficheros generados por el propio proyecto. Los modelos de Random Forest pueden pesar mucho: pendiente decidir si `models/` se aloja en Hugging Face en vez de GitHub.
 
+### DEC-45. Selección de municipios reservados
+
+
+- **Fecha:** 2026-10-25 · **Estado:** Aceptada
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-reserved-municipalities
+- **Contexto:** DEC-24 exige una partición geográfica definida y congelada al inicio del proyecto, estratificada por provincia y frecuencia de incendios y hecha por bloques de municipios próximos (HU-06). Hace falta concretar qué es un bloque, cómo se estratifica, qué fracción se reserva, con qué años se mide la frecuencia y cómo se congela.
+- **Decisión:**
+  - **Bloque:** los municipios que comparten la misma estación AEMET asignada (Silver no incluye la comarca). Un bloque se reserva entero o no se reserva.
+  - **Estratos:** provincia (la mayoritaria del bloque) × tercil de frecuencia de incendios del bloque (baja, media, alta). La frecuencia es la tasa de días distintos con al menos un parte de EGIF (`evento_incendio`) entre 2001 y 2021, años anteriores a validación y test (a confirmar con DEC-21).
+  - **Selección:** objetivo del 20 % por estrato, eligiendo bloques completos al azar con semilla 42. Como cada estrato reserva al menos un bloque entero, el resultado real supera el objetivo. Los parámetros (fracción 0,20, años 2001-2021, semilla 42) son los valores por defecto del script y se fijaron antes de ver resultados.
+  - **Resultado:** 81 municipios reservados (25,9 %) en 18 de 56 bloques: A Coruña 19 de 93 (20,4 %), Lugo 19 de 67 (28,4 %), Ourense 27 de 92 (29,3 %) y Pontevedra 16 de 61 (26,2 %). Días con incendio por municipio entre 2001 y 2021: 225,3 en los reservados y 250,2 en el resto (cociente 0,90). Lista en `docs/municipios_reservados.csv`; parámetros y bloques en `docs/municipios_reservados_meta.json`.
+  - **Congelación:** la lista no se modifica durante el proyecto. El script se niega a sobrescribirla sin `--forzar`, y los años, la fracción y la semilla no se cambian tras ver resultados.
+- **Alternativas descartadas:** reservar municipios sueltos al azar (los vecinos comparten clima y los resultados saldrían optimistas); reservar por comarca (no está en Silver; se valorará si se incorpora esa tabla); reservar provincias enteras (queda para la validación opcional leave-one-province-out).
+  - Se probó también una fracción de 0,12 (el resultado fue 21,1 % con A Coruña en el 10,8 %), y se descartó por dejar esa provincia infrarrepresentada.
+- **Consecuencias:**
+  - Reservar por estación es una aproximación: un municipio vecino atendido por otra estación puede quedar en entrenamiento, así que los escenarios B y C pueden salir algo optimistas.
+  - Con ~20 % de municipios, B y C tienen pocos días con incendio: los intervalos de confianza serán amplios (DEC-40).
+  - Al regenerar Silver con esta lista, `municipio.reservado` deja de ser nulo y desaparece el aviso del validador.
+  - Cambiar cualquier parámetro daría otra lista y obligaría a reentrenar y reevaluar todo, así que requeriría una nueva decisión.
+  - El porcentaje reservado por provincia varía entre el 20 % y el 29 % por el tamaño de los bloques de estación; se tendrá en cuenta al interpretar las métricas por provincia en B y C.
+
 ---
 
 ## Decisiones pendientes
@@ -481,7 +503,7 @@ Se cerrarán durante la adquisición y el EDA y se registrarán como nuevas entr
 
 - [ ] Periodo común disponible de AEMET, EGIF-MITECO y FWI, y volumen definitivo del dataset (carga 2001–actualidad, DEC-31).
 - [ ] División concreta de años de la partición temporal (DEC-21): confirmar qué años de EGIF son definitivos (DEC-31 habla de 2021; Silver llega a 2023) antes de fijar el último año completo como test.
-- [ ] Lista de municipios reservados y criterio de bloque usado: comarca o estación (DEC-22).
+- [X] Lista de municipios reservados y criterio de bloque usado: comarca o estación (DEC-22).
 - [ ] Medidas diarias de temperatura, humedad y viento (media, máxima, mínima…).
 - [ ] Método de imputación o descarte de variables meteorológicas con muchos faltantes.
 - [ ] Umbral de "precipitación relevante" para `racha_dias_secos`.
