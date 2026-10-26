@@ -21,6 +21,7 @@ RESERVADOS_CSV = ROOT / "docs" / "municipios_reservados.csv"
 RESERVADOS_META_JSON = ROOT / "docs" / "municipios_reservados_meta.json"
 PREDICCIONES_PARQUET = GOLD_DIR / "predicciones.parquet"
 EXPLICACIONES_PARQUET = GOLD_DIR / "explicaciones.parquet"
+DATASET_ENTRENAMIENTO = GOLD_DIR / "dataset_entrenamiento.parquet"
 
 # --- Columnas ---------------------------------------------------------------
 TARGET = "incendio_d1"
