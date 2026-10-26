@@ -53,6 +53,8 @@ class ModelBundle:
     n_pos_train: int
     params: dict = field(default_factory=dict)
     best_iteration: int | None = None
+    anio_desde: int | None = None
+    excluidas: list[str] = field(default_factory=list)
 
     @property
     def model_id(self) -> str:
@@ -84,13 +86,28 @@ def _build_model(algorithm: str, y: pd.Series, seed: int, params: dict | None):
 
 def train_model(df: pd.DataFrame, algorithm: str = "xgboost", variant: str = "con_fwi",
                 version: str = "v1", seed: int = SEED, params: dict | None = None,
-                early_stopping_rounds: int | None = 50) -> ModelBundle:
-    """Entrena un modelo sobre la capa Gold y devuelve un ModelBundle."""
+                early_stopping_rounds: int | None = 50, anio_desde: int | None = None,
+                excluir: list[str] | None = None) -> ModelBundle:
+    """Entrena un modelo sobre la capa Gold y devuelve un ModelBundle.
+
+    `anio_desde` recorta los años de entrenamiento más antiguos; `excluir` quita variables de la
+    variante. Ambos quedan en el nombre (`bundle.variant`) y en los metadatos del modelo.
+    """
     validate_schema(df)
     check_partition_integrity(df)
 
     feats = get_features(variant)
-    train = select_train(df)
+    excluir = list(excluir or [])
+    conocidas = {f for fs in FEATURE_SETS.values() for f in fs}
+    if set(excluir) - conocidas:
+        raise ValueError(f"Variables a excluir desconocidas: {sorted(set(excluir) - conocidas)}")
+    quitadas = [f for f in feats if f in excluir]
+    feats = [f for f in feats if f not in excluir]
+    if not feats:
+        raise ValueError("Tras excluir variables no queda ninguna para entrenar")
+    etiqueta = (variant + (f"-sin_{'_'.join(sorted(quitadas))}" if quitadas else "")
+                + (f"-desde{anio_desde}" if anio_desde else ""))
+    train = select_train(df, anio_desde)
     y = train[TARGET]
     n_pos = int(y.sum())
     if n_pos == 0 or n_pos == len(y):
@@ -112,11 +129,11 @@ def train_model(df: pd.DataFrame, algorithm: str = "xgboost", variant: str = "co
         model.fit(X, y)
 
     return ModelBundle(
-        model=model, features=feats, algorithm=algorithm, variant=variant,
+        model=model, features=feats, algorithm=algorithm, variant=etiqueta,
         version=version, seed=seed,
         trained_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         n_train=len(train), n_pos_train=n_pos, params=used_params,
-        best_iteration=best_iter,
+        best_iteration=best_iter, anio_desde=anio_desde, excluidas=quitadas,
     )
 
 

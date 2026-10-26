@@ -42,8 +42,8 @@ def test_entrena_solo_con_no_reservados_y_periodo_train(df):
 
 
 def test_reproducible_con_misma_semilla(df):
-    a = train.train_model(df, "xgboost", params=FAST, seed=42)
-    b = train.train_model(df, "xgboost", params=FAST, seed=42)
+    a = train.train_model(df, "xgboost", params=FAST, seed=1)
+    b = train.train_model(df, "xgboost", params=FAST, seed=1)
     X = df.head(500)
     assert np.allclose(train.score_dataframe(a, X)["proba"], train.score_dataframe(b, X)["proba"])
 
@@ -85,3 +85,24 @@ def test_no_toca_test_ni_reservados_early_stopping(df):
 def test_falla_si_esquema_invalido(df):
     with pytest.raises(ValueError, match="Faltan columnas"):
         train.train_model(df.drop(columns=["viento"]))
+
+
+def test_anio_desde_y_excluir_quedan_en_el_nombre_y_los_metadatos(df):
+    b = train.train_model(df, "xgboost", "con_fwi", params=FAST, anio_desde=2020, excluir=["viento", "fwi"])
+    assert b.variant == "con_fwi-sin_fwi_viento-desde2020"
+    assert "viento" not in b.features and "fwi" not in b.features and "temperatura" in b.features
+    assert b.anio_desde == 2020 and set(b.excluidas) == {"viento", "fwi"}
+    assert b.n_train < train.train_model(df, "xgboost", "con_fwi", params=FAST).n_train
+    assert b.model_id == "v1_xgboost_con_fwi-sin_fwi_viento-desde2020"
+
+
+def test_excluir_variable_que_no_esta_en_la_variante_no_cambia_el_nombre(df):
+    b = train.train_model(df, "xgboost", "sin_fwi", params=FAST, excluir=["fwi"])
+    assert b.variant == "sin_fwi" and b.excluidas == []
+
+
+def test_excluir_desconocida_o_todo_falla(df):
+    with pytest.raises(ValueError, match="desconocidas"):
+        train.train_model(df, "xgboost", excluir=["inventada"])
+    with pytest.raises(ValueError, match="ninguna"):
+        train.train_model(df, "xgboost", "solo_meteo", excluir=list(config.METEO_FEATURES))
