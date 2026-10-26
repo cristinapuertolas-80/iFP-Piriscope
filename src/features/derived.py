@@ -20,6 +20,8 @@ def comprobar_serie_diaria(df: pd.DataFrame) -> None:
     orden = df.sort_values([COL_MUN, COL_FECHA], kind="stable").index
     if not (orden == df.index).all():
         raise ValueError("El dataframe debe estar ordenado por id_municipio y fecha")
+    if df[COL_MUN].isna().any():
+        raise ValueError("Hay filas sin id_municipio")
     saltos = df.groupby(COL_MUN)[COL_FECHA].diff().dropna()
     if not (saltos == pd.Timedelta(days=1)).all():
         raise ValueError("Hay municipios con días repetidos o saltos en la serie diaria")
@@ -41,7 +43,10 @@ def racha_dias_secos(df: pd.DataFrame, umbral_seco_mm: float = 1.0) -> np.ndarra
     nan = np.isnan(p)
     evento = (p >= umbral_seco_mm) | nan            # días que cortan la cuenta (lluvia o sin dato)
     idx = np.arange(len(p))
-    cambia = df[COL_MUN].ne(df[COL_MUN].shift()).to_numpy()
+    # Con dtype 'string' (Silver), .ne(.shift()) devuelve <NA> en la primera fila: se compara en numpy
+    ids = df[COL_MUN].to_numpy(dtype=object)
+    cambia = np.ones(len(ids), dtype=bool)
+    cambia[1:] = ids[1:] != ids[:-1]
     inicio = np.maximum.accumulate(np.where(cambia, idx, 0))   # primera fila de su municipio
     ultimo = np.maximum.accumulate(np.where(evento, idx, inicio - 1))
     en_municipio = ultimo >= inicio                  # el último corte es del mismo municipio

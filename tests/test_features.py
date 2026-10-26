@@ -54,6 +54,16 @@ def test_racha_no_se_mezcla_entre_municipios():
     assert r[4:].tolist() == [1, 2, 0]          # b arranca limpio aunque a acabe en NaN
 
 
+def test_racha_y_acumulada_con_tipos_nullable_como_en_silver():
+    """Silver guarda id_municipio como 'string' y las medidas como 'Float64' (con pd.NA)."""
+    df = _serie({"a": [0, 0, 5, NAN, 0], "b": [0, 5, 0, 0, 0]})
+    df["id_municipio"] = df["id_municipio"].astype("string")
+    df["precipitacion"] = df["precipitacion"].astype("Float64")
+    out = dv.anadir_derivadas(df)
+    assert np.allclose(out["racha_dias_secos"], [1, 2, 0, NAN, NAN, 1, 0, 1, 2, 3], equal_nan=True)
+    assert out["precip_acum_7d"].dtype == "float64"
+
+
 def test_racha_coincide_con_la_referencia_lenta():
     rng = np.random.default_rng(3)
     series = {}
@@ -176,14 +186,23 @@ def _silver(tmp_path, con_csv=True):
     obs = g.assign(dist_estacion_km=5.0, temperatura=rng.normal(15, 5, n), humedad_relativa=rng.uniform(30, 100, n),
                    viento=rng.uniform(0, 6, n), precipitacion=rng.choice([0.0, 0.0, 4.0, NAN], n))
     obs["fecha"] = obs["fecha"].dt.date
+    obs["id_municipio"] = obs["id_municipio"].astype("string")
+    for c in ["dist_estacion_km", "temperatura", "humedad_relativa", "viento", "precipitacion"]:
+        obs[c] = obs[c].astype("Float64")
     fwi = g[~((g["fecha"] >= "2020-03-01") & (g["fecha"] <= "2020-03-31"))].copy()
     for c in config.FWI_FEATURES:
         fwi[c] = rng.uniform(0, 30, len(fwi))
     fwi["fecha"] = fwi["fecha"].dt.date
+    fwi["id_municipio"] = fwi["id_municipio"].astype("string")
+    for c in config.FWI_FEATURES:
+        fwi[c] = fwi[c].astype("Float64")
     ev = pd.DataFrame({"id_municipio": ["15001", "15001", "27001", "15002", None],
                        "fecha_deteccion": pd.to_datetime(["2021-07-10 12:00", "2021-07-10 20:00", "2023-12-31 23:00",
                                                           "2024-02-01 10:00", "2021-08-01 10:00"])})
-    mun = pd.DataFrame({"id_municipio": muns, "provincia": ["A Coruña", "A Coruña", "Lugo"], "reservado": [None] * 3})
+    ev["id_municipio"] = ev["id_municipio"].astype("string")
+    mun = pd.DataFrame({"id_municipio": pd.array(muns, dtype="string"),
+                        "provincia": pd.array(["A Coruña", "A Coruña", "Lugo"], dtype="string"),
+                        "reservado": pd.array([None] * 3, dtype="Int8")})
     s = tmp_path / "silver"
     s.mkdir()
     obs.to_parquet(s / "observacion_meteorologica.parquet")
