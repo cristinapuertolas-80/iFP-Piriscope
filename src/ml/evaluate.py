@@ -91,6 +91,34 @@ def bootstrap_ci(y, score, threshold: float, n_boot: int = 500,
     }
 
 
+def diferencia_auc_pr(y, score_a, score_b, n_boot: int = 500, alpha: float = 0.05,
+                      seed: int = SEED) -> dict:
+    """Diferencia de AUC-PR (a - b) con IC por bootstrap PAREADO.
+
+    Las dos puntuaciones se evalúan en las mismas remuestras de filas, así que el intervalo de la
+    diferencia es mucho más estrecho que comparar los IC de cada sistema por separado.
+    `p_mejora` = fracción de remuestras en las que `a` supera a `b`.
+    """
+    y, a, b = np.asarray(y), np.asarray(score_a), np.asarray(score_b)
+    nan = {"dif": float("nan"), "lo": float("nan"), "hi": float("nan"), "p_mejora": float("nan")}
+    if y.size == 0 or y.sum() == 0:
+        return nan
+    rng = np.random.default_rng(seed)
+    difs = []
+    for _ in range(n_boot):
+        idx = rng.integers(0, y.size, y.size)
+        yb = y[idx]
+        if yb.sum() == 0:
+            continue
+        difs.append(average_precision_score(yb, a[idx]) - average_precision_score(yb, b[idx]))
+    if not difs:
+        return nan
+    difs = np.asarray(difs)
+    lo, hi = np.quantile(difs, [alpha / 2, 1 - alpha / 2])
+    return {"dif": auc_pr(y, a) - auc_pr(y, b), "lo": float(lo), "hi": float(hi),
+            "p_mejora": float((difs > 0).mean())}
+
+
 # --- Umbrales y comparación -------------------------------------------------
 def thresholds_from_validation(val_df: pd.DataFrame, model_col: str = "proba",
                                baseline_col: str = BASELINE_COL,

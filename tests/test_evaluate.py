@@ -84,3 +84,37 @@ def test_compare_umbrales_incompletos(toy_gold):
     d = _scored(toy_gold)
     with pytest.raises(ValueError, match="thresholds"):
         ev.compare_model_vs_baseline(d, {"modelo": 0.5})
+
+
+def test_diferencia_auc_pr_identica_es_cero():
+    rng = np.random.default_rng(0)
+    y = (rng.random(3000) < 0.05).astype(int)
+    s = rng.random(3000)
+    d = ev.diferencia_auc_pr(y, s, s, n_boot=50)
+    assert d["dif"] == 0 and d["lo"] == 0 and d["hi"] == 0 and d["p_mejora"] == 0
+
+
+def test_diferencia_auc_pr_detecta_mejora_y_es_reproducible():
+    rng = np.random.default_rng(1)
+    y = (rng.random(5000) < 0.05).astype(int)
+    bueno, malo = y * 0.5 + rng.random(5000), rng.random(5000)
+    d = ev.diferencia_auc_pr(y, bueno, malo, n_boot=100, seed=3)
+    assert d["dif"] > 0 and d["lo"] > 0 and d["p_mejora"] == 1.0
+    assert d == ev.diferencia_auc_pr(y, bueno, malo, n_boot=100, seed=3)
+    inv = ev.diferencia_auc_pr(y, malo, bueno, n_boot=100, seed=3)
+    assert inv["hi"] < 0 and inv["p_mejora"] == 0.0
+
+
+def test_diferencia_auc_pr_pareada_es_mas_estrecha_que_comparar_intervalos():
+    rng = np.random.default_rng(2)
+    y = (rng.random(4000) < 0.05).astype(int)
+    base = y * 0.3 + rng.random(4000)
+    mejor = base + y * 0.15
+    d = ev.diferencia_auc_pr(y, mejor, base, n_boot=100)
+    thr = ev.threshold_for_recall(y, base, 0.8)
+    ci = ev.bootstrap_ci(y, base, thr, n_boot=100)["auc_pr"]
+    assert (d["hi"] - d["lo"]) < (ci[1] - ci[0])
+
+
+def test_diferencia_sin_positivos_es_nan():
+    assert np.isnan(ev.diferencia_auc_pr([0, 0], [0.1, 0.2], [0.3, 0.4])["dif"])

@@ -72,3 +72,26 @@ def test_anio_desde_y_excluir_en_el_informe(dataset, tmp_path):
     assert ex.main(_args(dataset, tmp_path, "--anio-desde", "2019", "--excluir", "viento")) == 0
     inf = pd.read_csv(tmp_path / "informe.csv")
     assert set(inf["variante"]) == {"con_fwi-sin_viento-desde2019", "sin_fwi-sin_viento-desde2019"}
+
+
+def test_informe_incluye_la_diferencia_pareada_con_el_fwi(dataset, tmp_path):
+    ex.main(_args(dataset, tmp_path))
+    inf = pd.read_csv(tmp_path / "informe.csv")
+    fila = inf[(inf["sistema"] == "modelo") & (inf["grupo"] == "global")]
+    assert fila[["dif_auc_pr", "dif_lo", "dif_hi", "p_mejora"]].notna().all().all()
+    assert (fila["dif_lo"] <= fila["dif_auc_pr"]).all() and (fila["dif_auc_pr"] <= fila["dif_hi"]).all()
+    assert inf[inf["sistema"] == "baseline_fwi"]["dif_auc_pr"].isna().all()
+    assert {"dif_auc_pr", "p_mejora"} <= set(ex.resumen_global(inf).columns)
+
+
+def test_param_llega_al_modelo_guardado(dataset, tmp_path):
+    import json
+    ex.main(_args(dataset, tmp_path, "--param", "max_depth=2", "learning_rate=0.1", "--guardar",
+                  "--models-dir", str(tmp_path / "m")))
+    meta = json.loads((tmp_path / "m" / "v1_xgboost_con_fwi.json").read_text(encoding="utf-8"))
+    assert meta["params"]["max_depth"] == 2 and meta["params"]["learning_rate"] == 0.1
+
+
+def test_param_mal_formado(dataset, tmp_path):
+    assert ex.main(_args(dataset, tmp_path, "--param", "max_depth")) == 2
+    assert ex.parsear_params(["a=1", "b=0.5", "c=hola"]) == {"a": 1, "b": 0.5, "c": "hola"}

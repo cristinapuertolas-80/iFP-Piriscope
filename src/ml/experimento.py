@@ -16,9 +16,11 @@ Uso:
 from __future__ import annotations
 
 import argparse
+import ast
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from . import config, evaluate, risk, splits, train
@@ -26,7 +28,9 @@ from . import config, evaluate, risk, splits, train
 ESCENARIOS_DESARROLLO = {"A-validacion": ("A", config.PART_VAL)}
 ESCENARIOS_FINALES = {"A-test": ("A", config.PART_TEST), "B": ("B", None), "C-test": ("C", config.PART_TEST)}
 COLUMNAS_INFORME = ["escenario", "algoritmo", "variante", "grupo", "sistema", "n", "n_pos", "prevalencia",
-                    "auc_pr", "auc_pr_lo", "auc_pr_hi", "recall", "recall_lo", "recall_hi", "precision", "umbral"]
+                    "auc_pr", "auc_pr_lo", "auc_pr_hi", "recall", "recall_lo", "recall_hi", "precision", "umbral",
+                    "dif_auc_pr", "dif_lo", "dif_hi", "p_mejora"]
+COLUMNAS_DIF = ["dif_auc_pr", "dif_lo", "dif_hi", "p_mejora"]
 
 
 def correr_variante(df: pd.DataFrame, algoritmo: str, variante: str, version: str, final: bool,
@@ -47,6 +51,12 @@ def correr_variante(df: pd.DataFrame, algoritmo: str, variante: str, version: st
         if datos.empty:
             raise ValueError(f"El escenario {nombre} no tiene filas: revisa `reservado` y `particion`")
         rep = evaluate.compare_model_vs_baseline(datos, umbrales, n_boot=n_boot, by_province=por_provincia)
+        # Diferencia pareada modelo - FWI (solo en la fila global del modelo)
+        d = datos.dropna(subset=[config.TARGET, "proba", config.BASELINE_COL])
+        dif = evaluate.diferencia_auc_pr(d[config.TARGET], d["proba"], d[config.BASELINE_COL], n_boot=n_boot)
+        rep[COLUMNAS_DIF] = np.nan
+        rep.loc[(rep["grupo"] == "global") & (rep["sistema"] == "modelo"), COLUMNAS_DIF] = [
+            dif["dif"], dif["lo"], dif["hi"], dif["p_mejora"]]
         partes.append(rep.assign(escenario=nombre, algoritmo=algoritmo, variante=bundle.variant))
     return bundle, riesgo, pd.concat(partes, ignore_index=True)[COLUMNAS_INFORME]
 
@@ -57,7 +67,23 @@ def resumen_global(informe: pd.DataFrame) -> pd.DataFrame:
     p = g.pivot_table(index=["escenario", "algoritmo", "variante"], columns="sistema",
                       values=["auc_pr", "recall", "precision"], sort=False)
     p.columns = [f"{m}_{'modelo' if s == 'modelo' else 'fwi'}" for m, s in p.columns]
-    return p.round(3).reset_index()
+    clave = ["escenario", "algoritmo", "variante"]
+    dif = g[g["sistema"] == "modelo"][clave + COLUMNAS_DIF]
+    return p.reset_index().merge(dif, on=clave).round(3)
+
+
+def parsear_params(items: list[str] | None) -> dict:
+    """['max_depth=3', 'learning_rate=0.02'] -> {'max_depth': 3, 'learning_rate': 0.02}."""
+    out = {}
+    for item in items or []:
+        if "=" not in item:
+            raise ValueError(f"Parámetro mal formado: {item!r} (usa clave=valor)")
+        clave, valor = item.split("=", 1)
+        try:
+            out[clave] = ast.literal_eval(valor)
+        except (ValueError, SyntaxError):
+            out[clave] = valor
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -69,6 +95,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--recall-objetivo", type=float, default=0.8)
     ap.add_argument("--bootstrap", type=int, default=None, help="remuestras (por defecto 100 en desarrollo, 500 en final)")
     ap.add_argument("--n-estimators", type=int, default=None)
+    ap.add_argument("--param", nargs="+", default=None, metavar="CLAVE=VALOR",
+                    help="hiperparámetros del modelo, p. ej. --param max_depth=3 learning_rate=0.02")
     ap.add_argument("--anio-desde", type=int, default=None, help="entrena solo con años >= este (recorta los antiguos)")
     todas = sorted({f for fs in config.FEATURE_SETS.values() for f in fs})
     ap.add_argument("--excluir", nargs="+", choices=todas, default=None, help="variables a quitar de cada variante")
@@ -90,7 +118,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     n_boot = a.bootstrap if a.bootstrap is not None else (500 if a.final else 100)
-    params = {"n_estimators": a.n_estimators} if a.n_estimators else None
+    try:
+        params = {**({"n_estimators": a.n_estimators} if a.n_estimators else {}), **parsear_params(a.param)} or None
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
     tr = splits.select_train(df, a.anio_desde)
     print(f"Fase: {'FINAL' if a.final else 'DESARROLLO (solo validación de municipios no reservados)'}")
     print(f"Entrenamiento: {len(tr):,} filas, {int(tr[config.TARGET].sum()):,} positivos "
