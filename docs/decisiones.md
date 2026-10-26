@@ -55,6 +55,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 | [DEC-43](#dec-43-explicabilidad-shap-y-gráficos-desde-gold) | Explicabilidad SHAP y gráficos desde Gold | Modelo / UX | Aceptada |
 | [DEC-44](#dec-44-persistencia-y-versionado-de-modelos) | Persistencia y versionado de modelos | Arquitectura | Aceptada (alojamiento pendiente) |
 | [DEC-45](#dec-45-selección-de-municipios-reservados) | Selección de municipios reservados | Validación / Modelo | Aceptada |
+| [DEC-46](#dec-46-dataset-de-gold-variables-derivadas-y-etiqueta) | Dataset de Gold: variables derivadas y etiqueta | Pipeline de datos / Modelo | Aceptada |
 
 ---
 
@@ -476,7 +477,6 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 
 ### DEC-45. Selección de municipios reservados
 
-
 - **Fecha:** 2026-10-25 · **Estado:** Aceptada
 - **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-reserved-municipalities
 - **Contexto:** DEC-24 exige una partición geográfica definida y congelada al inicio del proyecto, estratificada por provincia y frecuencia de incendios y hecha por bloques de municipios próximos (HU-06). Hace falta concretar qué es un bloque, cómo se estratifica, qué fracción se reserva, con qué años se mide la frecuencia y cómo se congela.
@@ -494,6 +494,27 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
   - Al regenerar Silver con esta lista, `municipio.reservado` deja de ser nulo y desaparece el aviso del validador.
   - Cambiar cualquier parámetro daría otra lista y obligaría a reentrenar y reevaluar todo, así que requeriría una nueva decisión.
   - El porcentaje reservado por provincia varía entre el 20 % y el 29 % por el tamaño de los bloques de estación; se tendrá en cuenta al interpretar las métricas por provincia en B y C.
+
+### DEC-46. Dataset de Gold: variables derivadas y etiqueta
+
+- **Fecha:** 2026-10-26 · **Estado:** Aceptada (parámetros provisionales hasta cerrar DEC-21)
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/features-gold
+- **Contexto:** Silver no incluye variables derivadas (DEC-07 y el apartado 7 del diseño las sitúan en Gold) y HU-05 exige al menos tres, documentadas, reproducibles y sin información posterior al día D. Hay que fijar sus definiciones, cómo se etiqueta la variable objetivo y cómo se reparten las particiones.
+- **Decisión:**
+  - **`racha_dias_secos`:** días consecutivos, hasta D incluido, con precipitación < 1 mm. Un día lluvioso la reinicia a 0. Un día sin dato la deja desconocida (NaN) hasta el siguiente día lluvioso: no se supone que los días sin dato fueran secos. Al inicio de la serie la cuenta arranca en 1.
+  - **`precip_acum_7d`:** precipitación de los 7 días que terminan en D (D incluido, porque ya se conoce al predecir D+1). NaN si falta algún día de la ventana.
+  - **`mes`:** mes del día D.
+  - **Sin imputación** en Gold: los nulos de Silver se conservan.
+  - **`incendio_d1`:** 1 si el municipio tiene al menos un parte de EGIF con fecha de detección D+1. Los partes sin municipio asignado se ignoran. Las filas cuyo D+1 cae después del final del año de test no llevan etiqueta ni partición: nunca se marcan como 0.
+  - **Particiones por año de `fecha`:** entrenamiento hasta 2021, validación 2022 y test 2023 (parámetros del comando; ver DEC-21 y DEC-31).
+  - **`reservado`** se toma de `docs/municipios_reservados.csv` (DEC-45), no de la columna de Silver.
+  - **Salidas:** `dataset_entrenamiento.parquet` (filas etiquetadas, validado contra el contrato de ML), `dataset_municipio_dia.parquet` (todas las filas, para inferencia) y `gold_informe.json`.
+- **Resultado:** 2.950.025 filas (2.628.887 etiquetadas) y 78.706 positivos (2,99 %). Prevalencia por partición: entrenamiento 3,18 %, validación 1,37 %, test 0,75 %. Nulos en filas etiquetadas: racha 23,1 % y acumulada 24,8 %, frente al 19,7 % de la precipitación original.
+- **Alternativas descartadas:** contar como seco un día sin dato (sesgaría la racha al alza); relajar la ventana de la acumulada (`--min-dias-acum` < 7), porque la exigencia estricta añade solo 3-5 puntos de nulos; marcar como 0 los días sin cobertura de EGIF (daría falsos negativos); usar el mes de D+1.
+- **Consecuencias:**
+  - La prevalencia cae de ~6 % (2001-2005) a ~1 % (desde 2018), y la cobertura meteorológica mejora de golpe en 2009 (humedad: de ~70 % a ~13 % de nulos). Los nulos pueden actuar como señal de época. Si se recorta el entrenamiento o se excluyen variables (p. ej. el viento, ~50 % de nulos desde 2012, que identifica estaciones) se decide con la validación y se registra en una decisión aparte.
+  - La Precision en test será menor que en validación por la menor prevalencia (0,75 % frente a 1,37 %), sin que eso indique peor modelo.
+  - Si DEC-21 cambia los años de partición, se vuelve a generar Gold con las opciones `--anio-*`.
 
 ---
 
