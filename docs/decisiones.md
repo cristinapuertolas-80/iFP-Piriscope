@@ -55,6 +55,8 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 | [DEC-43](#dec-43-explicabilidad-shap-y-gráficos-desde-gold) | Explicabilidad SHAP y gráficos desde Gold | Modelo / UX | Aceptada |
 | [DEC-44](#dec-44-persistencia-y-versionado-de-modelos) | Persistencia y versionado de modelos | Arquitectura | Aceptada (alojamiento pendiente) |
 | [DEC-45](#dec-45-selección-de-municipios-reservados) | Selección de municipios reservados | Validación / Modelo | Aceptada |
+| [DEC-46](#dec-46-dataset-de-gold-variables-derivadas-y-etiqueta) | Dataset de Gold: variables derivadas y etiqueta | Pipeline de datos / Modelo | Aceptada |
+| [DEC-47](#dec-47-configuración-del-modelo-y-protocolo-de-evaluación) | Configuración del modelo y protocolo de evaluación | Modelo / Evaluación | Aceptada |
 
 ---
 
@@ -476,7 +478,6 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 
 ### DEC-45. Selección de municipios reservados
 
-
 - **Fecha:** 2026-10-25 · **Estado:** Aceptada
 - **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-reserved-municipalities
 - **Contexto:** DEC-24 exige una partición geográfica definida y congelada al inicio del proyecto, estratificada por provincia y frecuencia de incendios y hecha por bloques de municipios próximos (HU-06). Hace falta concretar qué es un bloque, cómo se estratifica, qué fracción se reserva, con qué años se mide la frecuencia y cómo se congela.
@@ -495,6 +496,54 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
   - Cambiar cualquier parámetro daría otra lista y obligaría a reentrenar y reevaluar todo, así que requeriría una nueva decisión.
   - El porcentaje reservado por provincia varía entre el 20 % y el 29 % por el tamaño de los bloques de estación; se tendrá en cuenta al interpretar las métricas por provincia en B y C.
 
+### DEC-46. Dataset de Gold: variables derivadas y etiqueta
+
+- **Fecha:** 2026-10-26 · **Estado:** Aceptada (parámetros provisionales hasta cerrar DEC-21)
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/features-gold
+- **Contexto:** Silver no incluye variables derivadas (DEC-07 y el apartado 7 del diseño las sitúan en Gold) y HU-05 exige al menos tres, documentadas, reproducibles y sin información posterior al día D. Hay que fijar sus definiciones, cómo se etiqueta la variable objetivo y cómo se reparten las particiones.
+- **Decisión:**
+  - **`racha_dias_secos`:** días consecutivos, hasta D incluido, con precipitación < 1 mm. Un día lluvioso la reinicia a 0. Un día sin dato la deja desconocida (NaN) hasta el siguiente día lluvioso: no se supone que los días sin dato fueran secos. Al inicio de la serie la cuenta arranca en 1.
+  - **`precip_acum_7d`:** precipitación de los 7 días que terminan en D (D incluido, porque ya se conoce al predecir D+1). NaN si falta algún día de la ventana.
+  - **`mes`:** mes del día D.
+  - **Sin imputación** en Gold: los nulos de Silver se conservan.
+  - **`incendio_d1`:** 1 si el municipio tiene al menos un parte de EGIF con fecha de detección D+1. Los partes sin municipio asignado se ignoran. Las filas cuyo D+1 cae después del final del año de test no llevan etiqueta ni partición: nunca se marcan como 0.
+  - **Particiones por año de `fecha`:** entrenamiento hasta 2021, validación 2022 y test 2023 (parámetros del comando; ver DEC-21 y DEC-31).
+  - **`reservado`** se toma de `docs/municipios_reservados.csv` (DEC-45), no de la columna de Silver.
+  - **Salidas:** `dataset_entrenamiento.parquet` (filas etiquetadas, validado contra el contrato de ML), `dataset_municipio_dia.parquet` (todas las filas, para inferencia) y `gold_informe.json`.
+- **Resultado:** 2.950.025 filas (2.628.887 etiquetadas) y 78.706 positivos (2,99 %). Prevalencia por partición: entrenamiento 3,18 %, validación 1,37 %, test 0,75 %. Nulos en filas etiquetadas: racha 23,1 % y acumulada 24,8 %, frente al 19,7 % de la precipitación original.
+- **Alternativas descartadas:** contar como seco un día sin dato (sesgaría la racha al alza); relajar la ventana de la acumulada (`--min-dias-acum` < 7), porque la exigencia estricta añade solo 3-5 puntos de nulos; marcar como 0 los días sin cobertura de EGIF (daría falsos negativos); usar el mes de D+1.
+- **Consecuencias:**
+  - La prevalencia cae de ~6 % (2001-2005) a ~1 % (desde 2018), y la cobertura meteorológica mejora de golpe en 2009 (humedad: de ~70 % a ~13 % de nulos). Los nulos pueden actuar como señal de época. Si se recorta el entrenamiento o se excluyen variables (p. ej. el viento, ~50 % de nulos desde 2012, que identifica estaciones) se decide con la validación y se registra en una decisión aparte.
+  - La Precision en test será menor que en validación por la menor prevalencia (0,75 % frente a 1,37 %), sin que eso indique peor modelo.
+  - Si DEC-21 cambia los años de partición, se vuelve a generar Gold con las opciones `--anio-*`.
+
+### DEC-47. Configuración del modelo y protocolo de evaluación
+
+- **Fecha:** 2026-10-27 · **Estado:** Aceptada
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-experiments
+- **Contexto:** con el dataset de Gold real (DEC-46) hay que fijar el periodo de entrenamiento, las variables, los hiperparámetros y el protocolo de evaluación antes de mirar el test y los escenarios geográficos. Se probaron 10 configuraciones sobre la validación de 2022 (municipios no reservados) y una validación walk-forward de 2016 a 2022. Esto concreta y en parte sustituye a DEC-39 y DEC-40.
+- **Decisión:**
+  - **Periodo de entrenamiento: desde 2009.** Antes de 2009 la humedad falta en ~70 % de las filas (menos del 13 % desde ese año) y la temperatura y la precipitación en ~50 %; además la tasa de incendios era mucho mayor (~6 % frente a ~1-2 %). Mejora el AUC-PR en las cuatro comparaciones posibles (de +0,001 a +0,004).
+  - **Se excluye `viento`:** falta en el 45-72 % de las filas y su ausencia identifica estaciones concretas, lo que podría actuar como identificador de zona. En validación quitarlo no tiene efecto medible (de −0,002 a +0,0005 de AUC-PR).
+  - **Hiperparámetros por defecto** (XGBoost, profundidad 5, hasta 500 árboles con parada temprana). No se ajustan más: profundidad 3, aprendizaje lento y sin ponderar dan un AUC-PR de 0,056 a 0,058 (ruido).
+  - **`scale_pos_weight = 1`** (sin ponderar la clase positiva; sustituye al cociente negativos/positivos de DEC-39). Mismo AUC-PR, y la probabilidad queda en escala realista: el umbral del nivel medio pasa de 0,57 a 0,027. Random Forest mantiene `class_weight="balanced_subsample"`.
+  - **Variantes finales:** `con_fwi` y `sin_fwi`.
+  - **Intervalos de confianza por bootstrap por bloques de 7 días** (sustituye al bootstrap por filas de DEC-40, que daba intervalos demasiado estrechos porque los incendios se agrupan en olas) y diferencia de AUC-PR frente al FWI con bootstrap pareado.
+  - **Validación walk-forward (2016-2022):** para cada año Y se entrena solo con años anteriores, se usa Y−1 para la parada temprana y los umbrales, y se evalúa en Y, solo con municipios no reservados y sin llegar al año de test.
+  - **Dos fases:** desarrollo (solo validación de municipios no reservados) e informe final (A-test, B y C-test), que se ejecuta una sola vez con esta configuración.
+- **Resultado:**
+  - Validación 2022, `con_fwi`: AUC-PR 0,058 frente a 0,049 del FWI (diferencia +0,009; intervalo por bloques de 7 días de −0,007 a +0,020).
+  - Walk-forward 2016-2022, `con_fwi`: supera al FWI en **6 de 7 años**; diferencia media +0,010 (mediana +0,008); AUC-PR medio 0,065 frente a 0,055 (+18 %); el intervalo queda por encima de cero en 4 de 7 años. Solo pierde en 2020 (−0,0003, empate).
+  - Walk-forward, `sin_fwi`: supera al FWI en 5 de 7 años; diferencia media +0,004; intervalo por encima de cero en 2 de 7.
+  - Un modelo al azar tendría un AUC-PR igual a la prevalencia (0,8-2,4 % según el año): el modelo y el FWI rinden entre 4 y 6 veces más que eso.
+- **Alternativas descartadas:** más ajuste de hiperparámetros (sin efecto medible; riesgo de ajustarse al ruido de un solo año); mantener el viento; entrenar con todos los años desde 2001; bootstrap por filas.
+- **Consecuencias:**
+  - **Lo que se puede afirmar:** el modelo con FWI mejora al FWI de forma consistente pero modesta (~18 % de AUC-PR). El modelo sin FWI es prácticamente equivalente al FWI. No se afirma significación estadística global: un contraste de signos de 6 años de 7 daría p ≈ 0,06 (unilateral) y los años no son independientes.
+  - **Los umbrales de riesgo (DEC-41) son orientativos:** el Recall fijado en el año anterior no se reproduce con exactitud en el siguiente (entre 0,67 y 0,91 con objetivo 0,80, tanto en el modelo como en el FWI). Habrá que revisarlos periódicamente.
+  - **El informe final se publica sea cual sea su signo.** Si se cambia algo tras verlo, se documenta como excepción, porque esos resultados dejarían de ser una evaluación independiente.
+  - **Información nueva** (día del año en lugar del mes, evolución meteorológica reciente, historial de incendios del municipio) queda para una iteración futura; la última requeriría revisar DEC-25.
+  - El modelo para operación podrá reentrenarse con los años de validación y test una vez cerrada la evaluación (HU-11).
+
 ---
 
 ## Decisiones pendientes
@@ -505,15 +554,17 @@ Se cerrarán durante la adquisición y el EDA y se registrarán como nuevas entr
 - [ ] División concreta de años de la partición temporal (DEC-21): confirmar qué años de EGIF son definitivos (DEC-31 habla de 2021; Silver llega a 2023) antes de fijar el último año completo como test.
 - [X] Lista de municipios reservados y criterio de bloque usado: comarca o estación (DEC-22).
 - [ ] Medidas diarias de temperatura, humedad y viento (media, máxima, mínima…).
-- [ ] Método de imputación o descarte de variables meteorológicas con muchos faltantes.
+- [x] Imputación o descarte de variables meteorológicas con muchos faltantes (viento excluido; el resto se deja con nulos) → DEC-47.
 - [ ] Umbral de "precipitación relevante" para `racha_dias_secos`.
 - [ ] Formato definitivo de `id_evento` (¿se repite el número de parte entre provincias?) (DEC-14). La ingesta de EGIF lo detecta automáticamente y lo registra en `mapeo_columnas.json` (DEC-30).
 - [ ] Umbrales de los niveles bajo / medio / alto (DEC-04).
-- [ ] Modelo final (XGBoost o Random Forest), hiperparámetros y estrategia de balanceo (DEC-17, DEC-24).
+- [X] Modelo final, hiperparámetros y estrategia de balanceo (DEC-17, DEC-24, DEC-39) → DEC-47.
 - [ ] Recall objetivo de los niveles de riesgo (0,8 y 0,5) y cierre de DEC-04 (DEC-41).
-- [ ] Bootstrap por bloques en lugar de por filas (DEC-40).
+- [x] Bootstrap por bloques en lugar de por filas (DEC-40) → DEC-47.
 - [ ] Alojamiento de los modelos serializados: GitHub u Hugging Face (DEC-44).
 - [ ] Valor de cada variable junto a su contribución SHAP en el dashboard: ampliar el esquema o cruzar con Gold (DEC-43).
+- [ ] Revisar los umbrales de los niveles de riesgo con el informe final y con la calibración (DEC-41, DEC-47).
+- [ ] Valorar nueva información para el modelo (día del año, tendencia reciente, historial municipal) en una iteración futura (DEC-47, DEC-25).
 
 ---
 
