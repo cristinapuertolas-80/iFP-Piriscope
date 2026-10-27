@@ -106,3 +106,8 @@ def test_excluir_desconocida_o_todo_falla(df):
         train.train_model(df, "xgboost", excluir=["inventada"])
     with pytest.raises(ValueError, match="ninguna"):
         train.train_model(df, "xgboost", "solo_meteo", excluir=list(config.METEO_FEATURES))
+
+
+def test_xgboost_no_pondera_la_clase_positiva_por_defecto_pero_se_puede_cambiar(df):
+    assert train.train_model(df, "xgboost", params=FAST).params["scale_pos_weight"] == 1.0
+    assert train.train_model(df, "xgboost", params={**FAST, "scale_pos_weight": 30}).params["scale_pos_weight"] == 30

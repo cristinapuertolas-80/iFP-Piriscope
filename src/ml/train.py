@@ -3,7 +3,8 @@
 - Solo se entrena con filas reservado = 0 y particion = entrenamiento.
 - La validación (reservado = 0, particion = validacion) solo se usa para el
   early stopping de XGBoost. El test no se toca nunca aquí.
-- Desbalanceo: scale_pos_weight (XGBoost) / class_weight (Random Forest).
+- Desbalanceo: XGBoost sin ponderar la clase positiva (scale_pos_weight=1, DEC-47: mismo AUC-PR y
+  probabilidades en escala realista); Random Forest con class_weight="balanced_subsample".
 - Cada modelo se guarda con versión, semilla y metadatos en models/.
 """
 from __future__ import annotations
@@ -31,6 +32,9 @@ DEFAULT_PARAMS: dict[str, dict] = {
     "xgboost": {
         "n_estimators": 500, "learning_rate": 0.05, "max_depth": 5,
         "subsample": 0.8, "colsample_bytree": 0.8, "min_child_weight": 5,
+        # Sin ponderar: en validación da el mismo AUC-PR que negativos/positivos (~30) y la
+        # probabilidad queda en escala realista. Para ponderar: --param scale_pos_weight=30
+        "scale_pos_weight": 1.0,
     },
     "random_forest": {
         "n_estimators": 300, "max_depth": 12, "min_samples_leaf": 20,
@@ -72,8 +76,6 @@ def _build_model(algorithm: str, y: pd.Series, seed: int, params: dict | None):
         raise ValueError(f"Algoritmo {algorithm!r} no válido. Opciones: {ALGORITHMS}")
     p = {**DEFAULT_PARAMS[algorithm], **(params or {})}
     if algorithm == "xgboost":
-        n_pos = int(y.sum())
-        p.setdefault("scale_pos_weight", (len(y) - n_pos) / n_pos)
         model = XGBClassifier(
             eval_metric="aucpr", tree_method="hist", random_state=seed,
             n_jobs=-1, **p,
