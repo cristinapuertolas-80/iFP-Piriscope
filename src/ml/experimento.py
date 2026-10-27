@@ -6,6 +6,8 @@ Dos fases, para proteger el conjunto de test y la partición geográfica:
   Sirve para elegir configuración. Nunca toca test ni municipios reservados.
 - FINAL (`--final`): informe de A (test), B y C (test). Se ejecuta UNA vez, con la configuración
   ya decidida: mirar estos resultados y volver a cambiar el modelo contaminaría la evaluación.
+  El escenario B ("mismo periodo del entrenamiento") se recorta a los años del entrenamiento del
+  modelo (`--anio-desde`); `B-todos-los-anios` conserva la versión sin recortar.
 
 Los umbrales de Recall (modelo y baseline) se fijan siempre sobre la validación de A.
 
@@ -25,12 +27,23 @@ import pandas as pd
 
 from . import config, evaluate, risk, splits, train
 
-ESCENARIOS_DESARROLLO = {"A-validacion": ("A", config.PART_VAL)}
-ESCENARIOS_FINALES = {"A-test": ("A", config.PART_TEST), "B": ("B", None), "C-test": ("C", config.PART_TEST)}
 COLUMNAS_INFORME = ["escenario", "algoritmo", "variante", "grupo", "sistema", "n", "n_pos", "prevalencia",
                     "auc_pr", "auc_pr_lo", "auc_pr_hi", "recall", "recall_lo", "recall_hi", "precision", "umbral",
                     "dif_auc_pr", "dif_lo", "dif_hi", "p_mejora"]
 COLUMNAS_DIF = ["dif_auc_pr", "dif_lo", "dif_hi", "p_mejora"]
+
+
+def escenarios(final: bool, anio_desde: int | None) -> list[tuple[str, str, str | None, int | None]]:
+    """(nombre, escenario, partición, recorte de años). El escenario B se define como "mismo periodo
+    del entrenamiento": si el modelo se entrena desde `anio_desde`, B usa solo esos años. Con recorte,
+    se añade también `B-todos-los-anios` (sin recortar) para que quede a la vista."""
+    if not final:
+        return [("A-validacion", "A", config.PART_VAL, None)]
+    es = [("A-test", "A", config.PART_TEST, None), ("B", "B", None, anio_desde),
+          ("C-test", "C", config.PART_TEST, None)]
+    if anio_desde:
+        es.append(("B-todos-los-anios", "B", None, None))
+    return es
 
 
 def con_bloques(datos: pd.DataFrame, dias: int) -> tuple[pd.DataFrame, str | None]:
@@ -55,9 +68,11 @@ def correr_variante(df: pd.DataFrame, algoritmo: str, variante: str, version: st
     riesgo = risk.fit_risk_thresholds(val[config.TARGET], val["proba"], bundle.model_id)
 
     partes = []
-    for nombre, (esc, split) in (ESCENARIOS_FINALES if final else ESCENARIOS_DESARROLLO).items():
+    for nombre, esc, split, recorte in escenarios(final, anio_desde):
         datos = val if nombre == "A-validacion" else train.score_dataframe(
             bundle, splits.select_scenario(df, esc, split=split))
+        if recorte:
+            datos = datos[pd.to_datetime(datos[config.COL_FECHA]).dt.year >= recorte]
         if datos.empty:
             raise ValueError(f"El escenario {nombre} no tiene filas: revisa `reservado` y `particion`")
         datos, col_bloque = con_bloques(datos, bloque_dias)

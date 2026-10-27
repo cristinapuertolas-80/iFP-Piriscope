@@ -107,3 +107,17 @@ def test_con_bloques():
     out, col = ex.con_bloques(d, 7)
     assert out[col].tolist() == [0, 0, 1, 2]
     assert ex.con_bloques(d, 0)[1] is None
+
+
+def test_escenario_b_se_recorta_al_periodo_de_entrenamiento_del_modelo(dataset, tmp_path):
+    assert ex.main(_args(dataset, tmp_path, "--final", "--anio-desde", "2020")) == 0
+    inf = pd.read_csv(tmp_path / "informe.csv")
+    assert set(inf["escenario"]) == {"A-test", "B", "C-test", "B-todos-los-anios"}
+    n = inf[(inf["grupo"] == "global") & (inf["sistema"] == "modelo") & (inf["variante"].str.startswith("con_fwi"))]
+    n = n.set_index("escenario")["n"]
+    assert 0 < n["B"] < n["B-todos-los-anios"]
+
+
+def test_sin_anio_desde_no_hay_escenario_b_extra():
+    assert [e[0] for e in ex.escenarios(True, None)] == ["A-test", "B", "C-test"]
+    assert [e[0] for e in ex.escenarios(False, 2009)] == ["A-validacion"]
