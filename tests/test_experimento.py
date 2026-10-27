@@ -95,3 +95,15 @@ def test_param_llega_al_modelo_guardado(dataset, tmp_path):
 def test_param_mal_formado(dataset, tmp_path):
     assert ex.main(_args(dataset, tmp_path, "--param", "max_depth")) == 2
     assert ex.parsear_params(["a=1", "b=0.5", "c=hola"]) == {"a": 1, "b": 0.5, "c": "hola"}
+
+
+def test_bloque_dias_se_acepta_y_cero_es_por_filas(dataset, tmp_path):
+    assert ex.main(_args(dataset, tmp_path, "--bloque-dias", "14")) == 0
+    assert ex.main(_args(dataset, tmp_path, "--bloque-dias", "0")) == 0
+
+
+def test_con_bloques():
+    d = pd.DataFrame({"fecha": pd.to_datetime(["2022-01-01", "2022-01-07", "2022-01-08", "2022-01-20"])})
+    out, col = ex.con_bloques(d, 7)
+    assert out[col].tolist() == [0, 0, 1, 2]
+    assert ex.con_bloques(d, 0)[1] is None

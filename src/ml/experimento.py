@@ -33,10 +33,20 @@ COLUMNAS_INFORME = ["escenario", "algoritmo", "variante", "grupo", "sistema", "n
 COLUMNAS_DIF = ["dif_auc_pr", "dif_lo", "dif_hi", "p_mejora"]
 
 
+def con_bloques(datos: pd.DataFrame, dias: int) -> tuple[pd.DataFrame, str | None]:
+    """Añade una columna de bloques de `dias` días consecutivos (0 = sin bloques, bootstrap por filas)."""
+    if not dias:
+        return datos, None
+    out = datos.copy()
+    f = pd.to_datetime(out[config.COL_FECHA])
+    out["_bloque"] = ((f - f.min()).dt.days // dias).astype(int)
+    return out, "_bloque"
+
+
 def correr_variante(df: pd.DataFrame, algoritmo: str, variante: str, version: str, final: bool,
                     recall_objetivo: float, n_boot: int, por_provincia: bool,
                     params: dict | None = None, anio_desde: int | None = None,
-                    excluir: list[str] | None = None):
+                    excluir: list[str] | None = None, bloque_dias: int = 7):
     """Entrena una variante y devuelve (bundle, umbrales de riesgo, informe)."""
     bundle = train.train_model(df, algoritmo, variante, version, params=params,
                                anio_desde=anio_desde, excluir=excluir)
@@ -50,10 +60,13 @@ def correr_variante(df: pd.DataFrame, algoritmo: str, variante: str, version: st
             bundle, splits.select_scenario(df, esc, split=split))
         if datos.empty:
             raise ValueError(f"El escenario {nombre} no tiene filas: revisa `reservado` y `particion`")
-        rep = evaluate.compare_model_vs_baseline(datos, umbrales, n_boot=n_boot, by_province=por_provincia)
+        datos, col_bloque = con_bloques(datos, bloque_dias)
+        rep = evaluate.compare_model_vs_baseline(datos, umbrales, n_boot=n_boot, by_province=por_provincia,
+                                                 col_bloque=col_bloque)
         # Diferencia pareada modelo - FWI (solo en la fila global del modelo)
         d = datos.dropna(subset=[config.TARGET, "proba", config.BASELINE_COL])
-        dif = evaluate.diferencia_auc_pr(d[config.TARGET], d["proba"], d[config.BASELINE_COL], n_boot=n_boot)
+        dif = evaluate.diferencia_auc_pr(d[config.TARGET], d["proba"], d[config.BASELINE_COL], n_boot=n_boot,
+                                         bloques=d[col_bloque] if col_bloque else None)
         rep[COLUMNAS_DIF] = np.nan
         rep.loc[(rep["grupo"] == "global") & (rep["sistema"] == "modelo"), COLUMNAS_DIF] = [
             dif["dif"], dif["lo"], dif["hi"], dif["p_mejora"]]
@@ -94,6 +107,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--version", default="v1")
     ap.add_argument("--recall-objetivo", type=float, default=0.8)
     ap.add_argument("--bootstrap", type=int, default=None, help="remuestras (por defecto 100 en desarrollo, 500 en final)")
+    ap.add_argument("--bloque-dias", type=int, default=7,
+                    help="el bootstrap remuestrea bloques de N días seguidos (por defecto 7; 0 = filas sueltas)")
     ap.add_argument("--n-estimators", type=int, default=None)
     ap.add_argument("--param", nargs="+", default=None, metavar="CLAVE=VALOR",
                     help="hiperparámetros del modelo, p. ej. --param max_depth=3 learning_rate=0.02")
@@ -133,7 +148,8 @@ def main(argv: list[str] | None = None) -> int:
         for variante in a.variantes:
             bundle, riesgo, inf = correr_variante(df, a.algoritmo, variante, a.version, a.final,
                                                   a.recall_objetivo, n_boot, por_provincia=a.final, params=params,
-                                                  anio_desde=a.anio_desde, excluir=a.excluir)
+                                                  anio_desde=a.anio_desde, excluir=a.excluir,
+                                                  bloque_dias=a.bloque_dias)
             informes.append(inf)
             if a.guardar:
                 train.save_model(bundle, a.models_dir)
