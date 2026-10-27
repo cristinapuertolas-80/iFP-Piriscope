@@ -543,6 +543,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
   - **El informe final se publica sea cual sea su signo.** Si se cambia algo tras verlo, se documenta como excepción, porque esos resultados dejarían de ser una evaluación independiente.
   - **Información nueva** (día del año en lugar del mes, evolución meteorológica reciente, historial de incendios del municipio) queda para una iteración futura; la última requeriría revisar DEC-25.
   - El modelo para operación podrá reentrenarse con los años de validación y test una vez cerrada la evaluación (HU-11).
+  - El primer informe final incluyó los años 2001-2008 en el escenario B por un error del script; se corrigió y se conservan ambas versiones.
 
 ---
 
