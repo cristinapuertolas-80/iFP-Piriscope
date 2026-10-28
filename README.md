@@ -59,7 +59,7 @@ El sistema se organiza como un **pipeline de datos con arquitectura medallón** 
 | **Bronze** · `data/bronze` | Datos crudos en su formato original (JSON / Excel / CSV), archivados por fuente y fecha de ingesta, sin modificar |
 | **Silver** · `data/silver` | Limpieza, normalización y tipado en Parquet. Cada municipio se asocia a su estación AEMET más cercana, cada incendio a su código INE y el FWI al centroide del municipio. Controles de calidad |
 | **Gold** · `data/gold` | Variables derivadas (racha de días secos, precipitación acumulada…), dataset municipio-día con la variable objetivo, predicciones y explicaciones SHAP |
-| **ML** · `src/ml` | Entrenamiento offline con partición temporal y geográfica, modelo serializado y versionado en `models/`, inferencia batch D+1 y SHAP |
+| **ML** · [`src/ml`](src/ml/README.md) | Entrenamiento offline con partición temporal y geográfica, modelo serializado y versionado en `models/`, inferencia batch D+1 y SHAP |
 | **Dashboard** · `src/dashboard` | Streamlit. **Solo lee la capa Gold**: no entrena ni accede a las fuentes externas |
 
 - **Orquestación:** un único punto de entrada, `run_pipeline.py`, parametrizable por rango de fechas, encadena ingesta → Silver → Gold → entrenamiento/inferencia.
@@ -73,7 +73,7 @@ Más detalle en la [documentación y diseño técnico](docs/NF2_Documentacion_y_
 
 ## ▶️ Cómo ejecutar
 
-> 🚧 **El proyecto está en desarrollo.** La **ingesta de datos** ([`src/ingest`](src/ingest/README.md)) y la **capa Silver** ([`src/silver`](src/silver/README.md)) ya están implementadas; los pasos marcados con ⏳ aún no lo están.
+> 🚧 **El proyecto está en desarrollo.** La **ingesta de datos** ([`src/ingest`](src/ingest/README.md)), la **capa Silver** ([`src/silver`](src/silver/README.md)) y los módulos de **ML y explicabilidad** ([`src/ml`](src/ml/README.md), [`src/explainability`](src/explainability/README.md)) ya están implementados; los pasos marcados con ⏳ aún no lo están.
 
 ### 1. Requisitos previos
 
@@ -134,6 +134,8 @@ python run_pipeline.py --desde 2001-01-01 --hasta 2024-12-31 --etapas silver
 Tablas, cruce e informes de calidad: [src/silver/README.md](src/silver/README.md).
 
 ### 6. Ejecutar el resto del pipeline y el modelo ⏳
+
+Los módulos de **ML y explicabilidad** ya están implementados, pero todavía no se ejecutan desde `run_pipeline.py` ni leen la capa Gold real (pendiente de construir). Se usan desde Python: ejemplo y contrato de datos en [src/ml/README.md](src/ml/README.md).
 
 ```bash
 # Ingesta → Silver → Gold → entrenamiento/inferencia para un rango de fechas
