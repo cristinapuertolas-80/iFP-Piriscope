@@ -1,0 +1,13 @@
+variable,importancia_shap
+ffmc,0.29506853
+fwi,0.24780603
+precipitacion,0.1593131
+humedad_relativa,0.15214765
+dmc,0.12520604
+bui,0.098312624
+mes,0.09619876
+racha_dias_secos,0.07620959
+dc,0.062728964
+precip_acum_7d,0.054542016
+isi,0.02346219
+temperatura,0.01329874
