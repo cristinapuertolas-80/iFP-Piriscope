@@ -21,6 +21,7 @@ El modelo con FWI (`con_fwi`) **mejora al FWI** en los tres escenarios de test (
 | `reservados.py` | Selección reproducible de municipios reservados por bloques de estación, estratificada por provincia y frecuencia de incendios |
 | `experimento.py` | Entrena las variantes, compara con el FWI y escribe el informe (fases de desarrollo y final) |
 | `walkforward.py` | Validación walk-forward: repite la comparación con el FWI en varios años |
+| `inferir.py` | Inferencia batch con el modelo guardado, predicciones y SHAP |
 
 ## Contrato de entrada (tabla de entrenamiento de Gold)
 
@@ -156,7 +157,7 @@ Registradas en [docs/decisiones.md](../../docs/decisiones.md), DEC-37 a DEC-47 (
 - **Etiquetas de 2022 y 2023:** pendiente contrastar con las estadísticas oficiales de EGIF que sean definitivas (DEC-31).
 - Los umbrales de riesgo (0,8 y 0,5) son provisionales y el Recall objetivo no se reproduce con exactitud de un año a otro.
 - Los `.joblib` son pickles: solo cargar ficheros generados por el propio proyecto, y no se suben al repositorio. Pendiente decidir dónde alojar los modelos finales (DEC-44).
-- Pendiente: inferencia y SHAP con el modelo real, y la integración en `run_pipeline.py` (HU-11, que pasará `anio_desde=2009` y `excluir=["viento"]`).
+- Pendiente: integración en `run_pipeline.py` (HU-11, que pasará `anio_desde=2009` y `excluir=["viento"]`).
 
 ## Tests
 
