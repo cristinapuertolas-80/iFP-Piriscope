@@ -1,0 +1,47 @@
+{
+  "generado_utc": "2026-10-26T18:52:36+00:00",
+  "parametros": {
+    "umbral_seco_mm": 1.0,
+    "min_dias_acum": 7,
+    "anio_train_hasta": 2021,
+    "anio_validacion": 2022,
+    "anio_test": 2023
+  },
+  "filas": 2950025,
+  "filas_etiquetadas": 2628887,
+  "municipios": 313,
+  "fecha_min": "2001-01-01",
+  "fecha_max": "2026-10-21",
+  "positivos": 78706,
+  "prevalencia_pct": 2.994,
+  "prevalencia_pct_por_particion": {
+    "entrenamiento": 3.178,
+    "test": 0.75,
+    "validacion": 1.366
+  },
+  "prevalencia_pct_por_reservado": {
+    "0": 3.073,
+    "1": 2.768
+  },
+  "prevalencia_pct_por_provincia": {
+    "A Coruña": 2.441,
+    "Lugo": 2.013,
+    "Ourense": 3.644,
+    "Pontevedra": 3.934
+  },
+  "nulos_pct_filas_etiquetadas": {
+    "temperatura": 18.54,
+    "humedad_relativa": 27.24,
+    "viento": 57.13,
+    "precipitacion": 19.68,
+    "racha_dias_secos": 23.13,
+    "precip_acum_7d": 24.77,
+    "mes": 0.0,
+    "fwi": 3.25,
+    "ffmc": 3.25,
+    "dmc": 3.25,
+    "dc": 3.25,
+    "isi": 3.25,
+    "bui": 3.25
+  }
+}

@@ -16,9 +16,15 @@ from .config import (
 SCENARIOS = ("A", "B", "C")
 
 
-def select_train(df: pd.DataFrame) -> pd.DataFrame:
-    """Filas de entrenamiento: municipios no reservados, periodo de entrenamiento."""
-    return df[(df[COL_RESERVADO] == 0) & (df[COL_PARTICION] == PART_TRAIN)]
+def select_train(df: pd.DataFrame, anio_desde: int | None = None) -> pd.DataFrame:
+    """Filas de entrenamiento: municipios no reservados, periodo de entrenamiento.
+
+    `anio_desde` recorta los años más antiguos (p. ej. por mala cobertura meteorológica).
+    """
+    mask = (df[COL_RESERVADO] == 0) & (df[COL_PARTICION] == PART_TRAIN)
+    if anio_desde is not None:
+        mask &= pd.to_datetime(df[COL_FECHA]).dt.year >= anio_desde
+    return df[mask]
 
 
 def select_scenario(df: pd.DataFrame, scenario: str, split: str | None = None) -> pd.DataFrame:

@@ -1,0 +1,188 @@
+"""Experimento: entrena las variantes, las compara con el baseline FWI y escribe el informe (HU-06, HU-07).
+
+Dos fases, para proteger el conjunto de test y la partición geográfica:
+
+- DESARROLLO (por defecto): solo mira la VALIDACIÓN de municipios no reservados (escenario A).
+  Sirve para elegir configuración. Nunca toca test ni municipios reservados.
+- FINAL (`--final`): informe de A (test), B y C (test). Se ejecuta UNA vez, con la configuración
+  ya decidida: mirar estos resultados y volver a cambiar el modelo contaminaría la evaluación.
+  El escenario B ("mismo periodo del entrenamiento") se recorta a los años del entrenamiento del
+  modelo (`--anio-desde`); `B-todos-los-anios` conserva la versión sin recortar.
+
+Los umbrales de Recall (modelo y baseline) se fijan siempre sobre la validación de A.
+
+Uso:
+    python -m src.ml.experimento                         # desarrollo, XGBoost, tres variantes
+    python -m src.ml.experimento --final --guardar       # informe final y modelos en models/
+"""
+from __future__ import annotations
+
+import argparse
+import ast
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+from . import config, evaluate, risk, splits, train
+
+COLUMNAS_INFORME = ["escenario", "algoritmo", "variante", "grupo", "sistema", "n", "n_pos", "prevalencia",
+                    "auc_pr", "auc_pr_lo", "auc_pr_hi", "recall", "recall_lo", "recall_hi", "precision", "umbral",
+                    "dif_auc_pr", "dif_lo", "dif_hi", "p_mejora"]
+COLUMNAS_DIF = ["dif_auc_pr", "dif_lo", "dif_hi", "p_mejora"]
+
+
+def escenarios(final: bool, anio_desde: int | None) -> list[tuple[str, str, str | None, int | None]]:
+    """(nombre, escenario, partición, recorte de años). El escenario B se define como "mismo periodo
+    del entrenamiento": si el modelo se entrena desde `anio_desde`, B usa solo esos años. Con recorte,
+    se añade también `B-todos-los-anios` (sin recortar) para que quede a la vista."""
+    if not final:
+        return [("A-validacion", "A", config.PART_VAL, None)]
+    es = [("A-test", "A", config.PART_TEST, None), ("B", "B", None, anio_desde),
+          ("C-test", "C", config.PART_TEST, None)]
+    if anio_desde:
+        es.append(("B-todos-los-anios", "B", None, None))
+    return es
+
+
+def con_bloques(datos: pd.DataFrame, dias: int) -> tuple[pd.DataFrame, str | None]:
+    """Añade una columna de bloques de `dias` días consecutivos (0 = sin bloques, bootstrap por filas)."""
+    if not dias:
+        return datos, None
+    out = datos.copy()
+    f = pd.to_datetime(out[config.COL_FECHA])
+    out["_bloque"] = ((f - f.min()).dt.days // dias).astype(int)
+    return out, "_bloque"
+
+
+def correr_variante(df: pd.DataFrame, algoritmo: str, variante: str, version: str, final: bool,
+                    recall_objetivo: float, n_boot: int, por_provincia: bool,
+                    params: dict | None = None, anio_desde: int | None = None,
+                    excluir: list[str] | None = None, bloque_dias: int = 7):
+    """Entrena una variante y devuelve (bundle, umbrales de riesgo, informe)."""
+    bundle = train.train_model(df, algoritmo, variante, version, params=params,
+                               anio_desde=anio_desde, excluir=excluir)
+    val = train.score_dataframe(bundle, splits.select_scenario(df, "A", split=config.PART_VAL))
+    umbrales = evaluate.thresholds_from_validation(val, target_recall=recall_objetivo)
+    riesgo = risk.fit_risk_thresholds(val[config.TARGET], val["proba"], bundle.model_id)
+
+    partes = []
+    for nombre, esc, split, recorte in escenarios(final, anio_desde):
+        datos = val if nombre == "A-validacion" else train.score_dataframe(
+            bundle, splits.select_scenario(df, esc, split=split))
+        if recorte:
+            datos = datos[pd.to_datetime(datos[config.COL_FECHA]).dt.year >= recorte]
+        if datos.empty:
+            raise ValueError(f"El escenario {nombre} no tiene filas: revisa `reservado` y `particion`")
+        datos, col_bloque = con_bloques(datos, bloque_dias)
+        rep = evaluate.compare_model_vs_baseline(datos, umbrales, n_boot=n_boot, by_province=por_provincia,
+                                                 col_bloque=col_bloque)
+        # Diferencia pareada modelo - FWI (solo en la fila global del modelo)
+        d = datos.dropna(subset=[config.TARGET, "proba", config.BASELINE_COL])
+        dif = evaluate.diferencia_auc_pr(d[config.TARGET], d["proba"], d[config.BASELINE_COL], n_boot=n_boot,
+                                         bloques=d[col_bloque] if col_bloque else None)
+        rep[COLUMNAS_DIF] = np.nan
+        rep.loc[(rep["grupo"] == "global") & (rep["sistema"] == "modelo"), COLUMNAS_DIF] = [
+            dif["dif"], dif["lo"], dif["hi"], dif["p_mejora"]]
+        partes.append(rep.assign(escenario=nombre, algoritmo=algoritmo, variante=bundle.variant))
+    return bundle, riesgo, pd.concat(partes, ignore_index=True)[COLUMNAS_INFORME]
+
+
+def resumen_global(informe: pd.DataFrame) -> pd.DataFrame:
+    """Una fila por escenario y variante: AUC-PR, Recall y Precision del modelo y del FWI."""
+    g = informe[informe["grupo"] == "global"]
+    p = g.pivot_table(index=["escenario", "algoritmo", "variante"], columns="sistema",
+                      values=["auc_pr", "recall", "precision"], sort=False)
+    p.columns = [f"{m}_{'modelo' if s == 'modelo' else 'fwi'}" for m, s in p.columns]
+    clave = ["escenario", "algoritmo", "variante"]
+    dif = g[g["sistema"] == "modelo"][clave + COLUMNAS_DIF]
+    return p.reset_index().merge(dif, on=clave).round(3)
+
+
+def parsear_params(items: list[str] | None) -> dict:
+    """['max_depth=3', 'learning_rate=0.02'] -> {'max_depth': 3, 'learning_rate': 0.02}."""
+    out = {}
+    for item in items or []:
+        if "=" not in item:
+            raise ValueError(f"Parámetro mal formado: {item!r} (usa clave=valor)")
+        clave, valor = item.split("=", 1)
+        try:
+            out[clave] = ast.literal_eval(valor)
+        except (ValueError, SyntaxError):
+            out[clave] = valor
+    return out
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="Entrena, compara con el baseline FWI y escribe el informe")
+    ap.add_argument("--dataset", type=Path, default=config.DATASET_ENTRENAMIENTO)
+    ap.add_argument("--algoritmo", choices=train.ALGORITHMS, default="xgboost")
+    ap.add_argument("--variantes", nargs="+", choices=list(config.FEATURE_SETS), default=list(config.FEATURE_SETS))
+    ap.add_argument("--version", default="v1")
+    ap.add_argument("--recall-objetivo", type=float, default=0.8)
+    ap.add_argument("--bootstrap", type=int, default=None, help="remuestras (por defecto 100 en desarrollo, 500 en final)")
+    ap.add_argument("--bloque-dias", type=int, default=7,
+                    help="el bootstrap remuestrea bloques de N días seguidos (por defecto 7; 0 = filas sueltas)")
+    ap.add_argument("--n-estimators", type=int, default=None)
+    ap.add_argument("--param", nargs="+", default=None, metavar="CLAVE=VALOR",
+                    help="hiperparámetros del modelo, p. ej. --param max_depth=3 learning_rate=0.02")
+    ap.add_argument("--anio-desde", type=int, default=None, help="entrena solo con años >= este (recorta los antiguos)")
+    todas = sorted({f for fs in config.FEATURE_SETS.values() for f in fs})
+    ap.add_argument("--excluir", nargs="+", choices=todas, default=None, help="variables a quitar de cada variante")
+    ap.add_argument("--final", action="store_true", help="informe final: A (test), B y C. Ejecutar UNA vez")
+    ap.add_argument("--guardar", action="store_true", help="guarda modelos y umbrales en --models-dir")
+    ap.add_argument("--models-dir", type=Path, default=config.MODELS_DIR)
+    ap.add_argument("--salida", type=Path, default=None)
+    a = ap.parse_args(argv)
+
+    try:
+        df = pd.read_parquet(a.dataset)
+        config.validate_schema(df)
+        splits.check_partition_integrity(df)
+    except FileNotFoundError:
+        print(f"ERROR: no existe {a.dataset}. Genera Gold con `python -m src.features`.", file=sys.stderr)
+        return 2
+    except ValueError as e:
+        print(f"ERROR en el dataset: {e}", file=sys.stderr)
+        return 2
+
+    n_boot = a.bootstrap if a.bootstrap is not None else (500 if a.final else 100)
+    try:
+        params = {**({"n_estimators": a.n_estimators} if a.n_estimators else {}), **parsear_params(a.param)} or None
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    tr = splits.select_train(df, a.anio_desde)
+    print(f"Fase: {'FINAL' if a.final else 'DESARROLLO (solo validación de municipios no reservados)'}")
+    print(f"Entrenamiento: {len(tr):,} filas, {int(tr[config.TARGET].sum()):,} positivos "
+          f"({100 * tr[config.TARGET].mean():.2f} %)")
+
+    informes = []
+    try:
+        for variante in a.variantes:
+            bundle, riesgo, inf = correr_variante(df, a.algoritmo, variante, a.version, a.final,
+                                                  a.recall_objetivo, n_boot, por_provincia=a.final, params=params,
+                                                  anio_desde=a.anio_desde, excluir=a.excluir,
+                                                  bloque_dias=a.bloque_dias)
+            informes.append(inf)
+            if a.guardar:
+                train.save_model(bundle, a.models_dir)
+                risk.save_thresholds(riesgo, a.models_dir)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+
+    informe = pd.concat(informes, ignore_index=True)
+    salida = a.salida or config.GOLD_DIR / f"informe_{'final' if a.final else 'desarrollo'}.csv"
+    salida.parent.mkdir(parents=True, exist_ok=True)
+    informe.to_csv(salida, index=False)
+    print(f"\nRecall objetivo {a.recall_objetivo} (umbral fijado en validación; en esa partición el Recall es "
+          f"el objetivo por construcción, compara Precision y AUC-PR)")
+    print(resumen_global(informe).to_string(index=False))
+    print(f"\nInforme completo: {salida}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

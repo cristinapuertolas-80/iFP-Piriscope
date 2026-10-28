@@ -56,3 +56,10 @@ def test_integridad_detecta_reservado_inconsistente(toy_gold):
     bad.loc[idx, "reservado"] = 1  # un municipio no reservado con una fila marcada
     with pytest.raises(ValueError):
         splits.check_partition_integrity(bad)
+
+
+def test_select_train_anio_desde(toy_gold):
+    todo = splits.select_train(toy_gold)
+    recorte = splits.select_train(toy_gold, anio_desde=2020)
+    assert 0 < len(recorte) < len(todo)
+    assert (recorte["fecha"].dt.year >= 2020).all()
