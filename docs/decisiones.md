@@ -48,8 +48,8 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 | [DEC-36](#dec-36-controles-de-calidad-y-validación-de-silver) | Controles de calidad y validación de Silver | Calidad | Aceptada |
 | [DEC-37](#dec-37-contrato-de-entrada-del-módulo-ml) | Contrato de entrada del módulo ML | Modelo de datos / Modelo | Aceptada |
 | [DEC-38](#dec-38-variantes-del-modelo-y-variables-permitidas) | Variantes del modelo y variables permitidas | Modelo | Aceptada |
-| [DEC-39](#dec-39-protocolo-de-entrenamiento) | Protocolo de entrenamiento | Modelo | Aceptada (hiperparámetros pendientes) |
-| [DEC-40](#dec-40-comparación-con-el-baseline-fwi) | Comparación con el baseline FWI | Evaluación | Aceptada (bootstrap provisional) |
+| [DEC-39](#dec-39-protocolo-de-entrenamiento) | Protocolo de entrenamiento | Modelo | Sustituida en parte por DEC-47 |
+| [DEC-40](#dec-40-comparación-con-el-baseline-fwi) | Comparación con el baseline FWI | Evaluación | Sustituida en parte por DEC-47 |
 | [DEC-41](#dec-41-niveles-de-riesgo-por-recall-objetivo) | Niveles de riesgo por Recall objetivo | Modelo | Pendiente (valores provisionales) |
 | [DEC-42](#dec-42-inferencia-batch-d1-y-salidas-de-gold) | Inferencia batch D+1 y salidas de Gold | Arquitectura / Modelo | Aceptada |
 | [DEC-43](#dec-43-explicabilidad-shap-y-gráficos-desde-gold) | Explicabilidad SHAP y gráficos desde Gold | Modelo / UX | Aceptada |
@@ -58,6 +58,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 | [DEC-46](#dec-46-dataset-de-gold-variables-derivadas-y-etiqueta) | Dataset de Gold: variables derivadas y etiqueta | Pipeline de datos / Modelo | Aceptada |
 | [DEC-47](#dec-47-configuración-del-modelo-y-protocolo-de-evaluación) | Configuración del modelo y protocolo de evaluación | Modelo / Evaluación | Aceptada |
 | [DEC-48](#dec-48-inferencia-real-dominio-del-modelo-modelo-de-respaldo-y-filas-sin-predicción) | Inferencia real: dominio del modelo, modelo de respaldo y filas sin predicción | Modelo / Arquitectura | Aceptada |
+| [DEC-49](#dec-49-niveles-de-riesgo-saturación-en-episodios-de-sequía-y-presentación) | Niveles de riesgo: saturación en sequía y presentación | Modelo / UX | Pendiente |
 
 ---
 
@@ -427,7 +428,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 
 ### DEC-39. Protocolo de entrenamiento
 
-- **Fecha:** 2026-10-25 · **Estado:** Aceptada (hiperparámetros pendientes)
+- **Fecha:** 2026-10-25 · **Estado:** Sustituida en parte por DEC-47 (periodo de entrenamiento, hiperparámetros y `scale_pos_weight`; el resto sigue vigente)
 - **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-explainability
 - **Contexto:** DEC-17 y DEC-24 fijan los modelos y el tratamiento del desbalanceo, pero no el procedimiento concreto de entrenamiento.
 - **Decisión:** XGBoost y Random Forest se entrenan solo con filas `reservado = 0` y `particion = entrenamiento`. Desbalanceo: `scale_pos_weight` (negativos entre positivos) en XGBoost y `class_weight="balanced_subsample"` en Random Forest. El *early stopping* de XGBoost mide AUC-PR sobre la validación de municipios **no reservados**; el test y los municipios reservados no se usan nunca durante el entrenamiento. Semilla fija (42). Los hiperparámetros son valores por defecto razonables, sin ajustar.
@@ -436,7 +437,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 
 ### DEC-40. Comparación con el baseline FWI
 
-- **Fecha:** 2026-10-25 · **Estado:** Aceptada (bootstrap provisional)
+- **Fecha:** 2026-10-25 · **Estado:** Sustituida en parte por DEC-47 (el bootstrap pasa a ser por bloques de 7 días; el resto sigue vigente)
 - **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-explainability
 - **Contexto:** DEC-23 y DEC-24 piden comparar modelo y FWI sobre los mismos datos, con Recall, AUC-PR e intervalos de confianza. El FWI no es una probabilidad, así que hay que decidir cómo medir el Recall.
 - **Decisión:** modelo y FWI se evalúan sobre **exactamente las mismas filas** (se descartan de ambos las filas sin FWI o sin probabilidad). El FWI se usa como puntuación continua. El AUC-PR es la métrica principal, porque no depende del umbral. El Recall se mide con un umbral **fijado en validación**, con el mismo Recall objetivo para ambos sistemas, nunca en el conjunto evaluado; así, la comparación en test se lee en Precision (falsas alarmas). Los intervalos se calculan por bootstrap sobre filas (500 remuestras, semilla fija), global y por provincia, en los tres escenarios.
@@ -451,15 +452,20 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 - **Decisión:** los umbrales se fijan sobre la validación de municipios no reservados mediante Recall objetivo: **medio** = mayor umbral con Recall ≥ 0,8 y **alto** = mayor umbral con Recall ≥ 0,5. Se guardan junto al modelo (`<id>_umbrales.json`) y el código rechaza aplicar los umbrales de otro modelo.
 - **Alternativas descartadas:** cuantiles de probabilidad y cortes fijos (0,33 / 0,66), porque no tienen significado operativo con una prevalencia baja.
 - **Consecuencias:** «medio o superior» captura ≈80 % de los días con incendio de validación y «alto» ≈50 %, con menos falsas alarmas. Con muy pocos positivos, «medio» puede generar muchas alarmas; se revisará con la Precision real. Los porcentajes 0,8 y 0,5 se reajustan tras el EDA; hasta entonces DEC-04 sigue pendiente.
+- **Hallazgos (inferencia 2024-2026, DEC-48):**
+  - Los niveles absolutos saturan en episodios de sequía real: 84 de las 1.024 fechas predichas tienen al menos el 95 % de los municipios en «medio» o «alto» (máximo, 100 % el 2024-04-23). Se reparten así: 46 en agosto, 13 en abril, 12 en julio, 6 en junio, 5 en septiembre, 1 en marzo y 1 en octubre.
+  - No es un fallo de datos. Todas son filas del modelo principal (con FWI), los nulos son normales (0 % en FWI y componentes) y la meteorología de esos días es extrema: FWI medio 22,6 frente a 8,6 en el histórico de esos meses, FFMC 88,6 frente a 72,8, DC 417 frente a 249, precipitación 0,02 mm frente a 2,62 y racha de días secos 16 frente a 5,9. El SHAP lo dominan `ffmc`, `fwi` y `bui`; `mes` apenas pesa (aparece en el 26 % de las predicciones saturadas, con SHAP medio 0,06), así que tampoco es saturación estacional.
+  - El modelo sigue ordenando los municipios en esas fechas (en las cinco más saturadas, entre 76 y 103 probabilidades distintas, de 0,03 a 0,18); lo que se pierde es la capacidad de los niveles absolutos para priorizar.
+  - Porcentaje de municipio-días en «medio» o «alto» por mes en 2024-2026: 36 % en abril, 68 % en julio y 82 % en agosto, frente a prevalencias históricas (2009-2023) del 1,5 %, 3,0 % y 5,0 %. Tratamiento en DEC-49.
 
 ### DEC-42. Inferencia batch D+1 y salidas de Gold
 
 - **Fecha:** 2026-10-25 · **Estado:** Aceptada
 - **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-explainability
 - **Contexto:** DEC-12, DEC-14 y DEC-15 establecen que las predicciones se calculan en batch y se escriben en Gold con trazabilidad.
-- **Decisión:** para cada municipio con fila del día D se predice D+1 (`fecha_objetivo = D + 1`). `predicciones.parquet` contiene `id_prediccion`, `id_municipio`, `fecha_objetivo`, `version_modelo`, `probabilidad`, `nivel_riesgo`, `fwi` (copia del día D) y `fecha_insert`. `explicaciones.parquet` contiene `id_prediccion`, `variable` y `valor_shap`. Ambas escrituras sobrescriben las filas con el mismo `id_prediccion` y conservan el resto. Por defecto se predice el último día disponible, y se admite un rango de fechas. En producción se predicen todos los municipios, reservados incluidos.
+- **Decisión:** para cada municipio con fila del día D se predice D+1 (`fecha_objetivo = D + 1`). `predicciones.parquet` contiene `id_prediccion`, `id_municipio`, `fecha_objetivo`, `version_modelo`, `probabilidad`, `nivel_riesgo`, `fwi` (copia del día D) y `fecha_insert`. `explicaciones.parquet` contiene `id_prediccion`, `variable` y `valor_shap`. Al escribir, las predicciones nuevas sustituyen a las existentes del mismo municipio y `fecha_objetivo` (aunque tengan otra `version_modelo`) y a sus explicaciones, y se conserva el resto (DEC-48). Por defecto se predice el último día disponible, y se admite un rango de fechas. En producción se predicen todos los municipios, reservados incluidos.
 - **Consecuencias:** `version_modelo` (p. ej. `v1`) forma parte del id. Las variantes del modelo comparten versión y se distinguen en el nombre del fichero; en producción solo predice una, así que no hay colisión.
-- **Ampliada por DEC-48:** `version_modelo` puede valer `<versión>-respaldo` (predicción con el modelo sin FWI) y una fecha puede tener menos de 313 municipios, porque no se predicen las filas fuera del dominio del modelo ni las que no tienen ninguna variable con dato. La inferencia se ejecuta con `python -m src.ml.inferir`.
+- **Ampliada por DEC-48:** `version_modelo` puede valer `<versión>-respaldo` (predicción con el modelo sin FWI) y una fecha puede tener menos de 313 municipios, porque no se predicen las filas fuera del dominio del modelo ni las que no tienen ninguna variable con dato. La inferencia se ejecuta con `python -m src.ml.inferir`. Como consecuencia, la afirmación anterior de que «en producción solo predice una [variante], así que no hay colisión» deja de ser cierta: la unicidad que importa es una predicción vigente por municipio y fecha, no por `id_prediccion`.
 
 ### DEC-43. Explicabilidad SHAP y gráficos desde Gold
 
@@ -478,8 +484,8 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 - **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-explainability
 - **Contexto:** DEC-11 y DEC-17 prevén modelos serializados y versionados en `models/`.
 - **Decisión:** cada modelo se guarda con `joblib` en `models/<versión>_<algoritmo>_<variante>.joblib`, junto a un `.json` con versión, semilla, variables, parámetros, número de filas y fecha de entrenamiento, y un `_umbrales.json` (DEC-41).
-- **Consecuencias:** los `.joblib` son pickles, así que solo se cargan ficheros generados por el propio proyecto. Los modelos de Random Forest pueden pesar mucho:~~pendiente decidir si `models/` se aloja en Hugging Face en vez de GitHub~~.
-- **Decidido:** los `.joblib` no se suben al repositorio (son *pickles* y los binarios no se pueden revisar en un PR); se versionan los `.json` de metadatos y de umbrales, que documentan cada versión. Los dos modelos finales (`con_fwi` y `sin_fwi`, que necesita la inferencia por DEC-48) se publican en Hugging Face cuando se cierre la entrega..
+- **Consecuencias:** los `.joblib` son pickles, así que solo se cargan ficheros generados por el propio proyecto. Los modelos de Random Forest pueden pesar mucho. ~~Pendiente decidir si `models/` se aloja en Hugging Face en vez de GitHub.~~
+- **Decidido:** los `.joblib` no se suben al repositorio (son *pickles* y los binarios no se pueden revisar en un PR); se versionan los `.json` de metadatos y de umbrales, que documentan cada versión. Los dos modelos finales (`con_fwi` y `sin_fwi`, que necesita la inferencia por DEC-48) se publican en Hugging Face cuando se cierre la entrega.
 
 ### DEC-45. Selección de municipios reservados
 
@@ -562,8 +568,12 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
   - **Modelo de respaldo (`--modelo-respaldo`):** las filas fuera del dominio se predicen con el modelo sin FWI (`sin_fwi`), con sus propios umbrales de riesgo y sus propias explicaciones SHAP (que no usan variables del FWI). Se marcan con `version_modelo = <versión>-respaldo` (p. ej. `v1-respaldo`), y el `id_prediccion` las distingue.
   - **Filas sin información (`--min-variables`, por defecto 1):** una fila en la que todas las variables, salvo el mes, están vacías no se predice, ni con el modelo principal ni con el de respaldo. Solo recibiría la «climatología» del mes: un valor casi constante cuyo nivel de riesgo lo decide el ruido.
   - **Lo que no se puede predecir se omite:** no se rellena ni se inventa un nivel. En `predicciones.parquet` simplemente no hay fila para ese municipio y fecha, y el dashboard lo muestra como «sin dato». No se añade un cuarto nivel a `nivel_riesgo`, para respetar el esquema de `Prediccion` (bajo, medio, alto).
-  - **`--reemplazar`:** borra las salidas existentes antes de escribir. Es necesario al regenerar fechas cuya versión cambia (`v1` pasa a `v1-respaldo`), porque el `id_prediccion` incluye la versión y las filas antiguas no se sobrescribirían.
-- **Resultado (2024-01-02 a 2026-10-22):** 320.750 predicciones de 320.825 posibles. 319.886 con el modelo principal (`v1`), 864 con el de respaldo (`v1-respaldo`, fechas 20 a 22 de octubre, sin FWI) y 75 sin predicción (25 municipios sin ninguna variable meteorológica con dato, por 3 fechas). Los 25 municipios excluidos eran justo los que antes salían en «medio» con el valor de «sin información» (~0,022).
+  - **Una predicción vigente por municipio y fecha:** al escribir, las predicciones nuevas sustituyen a las que ya existían para el mismo (`id_municipio`, `fecha_objetivo`), aunque tengan otra `version_modelo`, junto con sus explicaciones. Así, cuando llega el FWI de unos días predichos con el respaldo, `v1` reemplaza a `v1-respaldo` sin duplicados y sin borrar el resto del histórico, y la ejecución diaria con ventana corta es segura. Antes de escribir se comprueba que no hay duplicados y que las explicaciones coinciden con las predicciones.
+  - **`--reemplazar`:** descarta todo el contenido anterior de las salidas; queda solo para empezar de cero.
+  - **Escritura atómica y orden:** todo se escribe en ficheros temporales y solo al final se reemplazan los reales. Las figuras de ejemplo se generan después de las salidas: si fallan, el código de salida es 2 pero las predicciones ya están escritas.
+  - **Avisos por stderr** (no detienen la ejecución): cobertura inferior a `--min-cobertura` (0,8), fechas con al menos `--aviso-alarmas` (0,95) de municipios en «medio» o «alto», variables meteorológicas con muchos nulos en el último día D y, en el modo «último día», retraso respecto a hoy superior a `--max-retraso`. `--min-variables-respaldo` permite exigir más variables con dato al modelo de respaldo.
+  - **Verificación:** `verificar_salidas.py` comprueba unicidad, coherencia entre predicciones y explicaciones, ausencia de FWI en el respaldo, cobertura y coherencia de los niveles con los `_umbrales.json`.
+- **Resultado (fechas objetivo 2024-01-03 a 2026-10-22, verificado con `verificar_salidas.py`):** 320.437 predicciones de 320.512 posibles (1.024 fechas × 313 municipios). 319.573 con el modelo principal (`v1`), 864 con el de respaldo (`v1-respaldo`, fechas 20 a 22 de octubre, sin FWI) y 75 sin predicción (25 municipios sin ninguna variable meteorológica con dato, por 3 fechas). Los 25 municipios excluidos recibían la climatología (~0,022), que supera el umbral «medio» del modelo de respaldo (0,0220) pero no el del principal (0,0273): por eso salían en «medio».
 - **Alternativas descartadas:** dejar que XGBoost trate el FWI vacío (valores arbitrarios, como se comprobó); imputar el FWI con el último valor disponible (introduce un dato inventado y el FWI cambia con rapidez en los días críticos); reentrenar permitiendo FWI vacío (no hay ejemplos desde 2009 con los que aprenderlo, y volver a incluir los años anteriores empeora los datos); añadir un nivel «sin dato» a `nivel_riesgo`.
 - **Consecuencias:**
   - **Los 2 o 3 últimos días se predicen siempre con el respaldo**, mientras el FWI llegue con retraso. Según DEC-47, el modelo sin FWI equivale al FWI, no lo mejora: esas predicciones son menos fiables.
@@ -572,6 +582,21 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
   - La inferencia necesita guardados **los dos modelos** (`con_fwi` y `sin_fwi`) con sus umbrales.
   - Si en el futuro se añaden al modelo más variables con cobertura total, entran automáticamente en el dominio.
   - Las filas de 2024 a 2026 no tienen etiqueta (EGIF no llega); las de fechas hasta 2022 no son *out-of-sample* (el modelo se entrenó con 2009-2021 y paró en 2022): sirven para demostrar el flujo, no para evaluar.
+  - **Los niveles del respaldo discriminan muy poco:** sus umbrales «medio» y «alto» (0,0220 y 0,0241) están separados por 0,002 y sus probabilidades se mueven en un rango estrecho (0,019 a 0,027), de modo que una diferencia de 0,001 cambia el nivel. Equivale al FWI (DEC-47), no lo mejora.
+  - **Desfase de los datos:** la última fecha objetivo (22/10) iba por detrás de la fecha de ejecución (29/10). El FWI y la meteorología llegan con retraso (DEC-31), así que las predicciones más recientes son una estimación con varios días de desfase respecto a hoy.
+  - **FWI intermedio:** los meses aún no consolidados usan el dataset intermedio (DEC-31, DEC-34), pero el modelo se entrenó con FWI consolidado. No se ha comparado el efecto sobre las predicciones recientes (pendiente).
+
+### DEC-49. Niveles de riesgo: saturación en episodios de sequía y presentación
+
+- **Fecha:** 2026-10-29 · **Estado:** Pendiente
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-inference
+- **Contexto:** con los umbrales de DEC-41 (medio 0,0273 y alto 0,0449, fijados por Recall objetivo sobre 2022), 84 de las 1.024 fechas predichas en 2024-2026 tienen al menos el 95 % de los municipios en «medio» o «alto» (hallazgos en DEC-41). Son episodios de sequía real, no un fallo de datos ni un efecto del mes, pero en ellos el nivel absoluto deja de servir para priorizar la vigilancia.
+- **Decisión:** pendiente. Mientras no se cierre se mantienen los niveles de DEC-41 y la probabilidad se publica tal cual (DEC-42). Opciones en estudio:
+  1. Mostrar además el percentil del municipio dentro de su fecha, calculado desde `probabilidad`, sin cambiar el esquema de `Prediccion`.
+  2. Fijar los umbrales por presupuesto de alarmas (fracción máxima de municipio-días en «alto») en lugar de por Recall, estimándolos con el walk-forward 2016-2022 de DEC-47, que tiene más positivos que 2022 sola.
+  3. Mantener los niveles y documentar la saturación como limitación.
+- **Alternativas descartadas:** umbrales por mes calculados solo con 2022 (unos 1.200 positivos en todo el año, demasiado pocos por mes); usar el test de 2023 para ajustar umbrales o calibrar (DEC-47 lo reserva para el informe final).
+- **Consecuencias:** el dashboard muestra siempre la probabilidad junto al nivel. Si se adopta la opción 1 o la 2 hay que reflejarlo en DEC-04 y DEC-41. Tampoco se ha comprobado la calibración de la probabilidad (en noviembre y diciembre la media prevista es del 0,6-0,7 % frente a prevalencias históricas del 0,2-0,3 %); hasta comprobarla se propone presentarla como índice de riesgo y no como probabilidad exacta.
 
 ---
 
@@ -590,16 +615,21 @@ Se cerrarán durante la adquisición y el EDA y se registrarán como nuevas entr
 - [X] Modelo final, hiperparámetros y estrategia de balanceo (DEC-17, DEC-24, DEC-39) → DEC-47.
 - [ ] Recall objetivo de los niveles de riesgo (0,8 y 0,5) y cierre de DEC-04 (DEC-41).
 - [x] Bootstrap por bloques en lugar de por filas (DEC-40) → DEC-47.
-- [ ] Alojamiento de los modelos serializados: GitHub u Hugging Face (DEC-44).
-- [ ] Valor de cada variable junto a su contribución SHAP en el dashboard: ampliar el esquema o cruzar con Gold (DEC-43).
+- [x] Alojamiento de los modelos serializados: los `.joblib` no se suben al repositorio y se publicarán en Hugging Face (DEC-44).
+- [ ] Valor de cada variable y valor base de SHAP junto a las contribuciones (sin el valor base no se reconstruye la probabilidad): ampliar el esquema de `explicaciones.parquet` o cruzar con Gold (DEC-43).
 - [ ] Revisar los umbrales de los niveles de riesgo con el informe final y con la calibración (DEC-41, DEC-47).
 - [ ] Valorar nueva información para el modelo (día del año, tendencia reciente, historial municipal) en una iteración futura (DEC-47, DEC-25).
 - [ ] Calibrar la probabilidad o presentarla como índice de riesgo en el dashboard: el modelo se entrena con una prevalencia del ~2 % y en 2023 fue del 0,75 % (DEC-47).
 - [ ] Dashboard: mostrar `v1-respaldo` como «estimación sin FWI» y las ausencias como «sin dato» (DEC-48).
 - [ ] Reducir los días de respaldo: valorar una fuente de FWI más reciente (el retraso actual es de 2 a 3 días) (DEC-48).
-- [ ] Valorar umbrales de riesgo distintos por época del año: con el Recall del 80 %, en agosto el 82 % de los municipio-días entra en «medio o superior» (DEC-41).
+- [ ] Valorar umbrales o niveles alternativos: con el Recall del 80 %, en agosto el 82 % de los municipio-días entra en «medio o superior» (DEC-41). Por mes queda descartado por falta de positivos; cierre en DEC-49.
 - [ ] Subir los modelos finales a Hugging Face y enlazarlos (DEC-44).
 - [ ] Contrastar con las estadísticas oficiales si las etiquetas de 2022 y 2023 son definitivas (DEC-31, DEC-21).
+- [ ] Cerrar DEC-49: cómo se muestran los niveles en el dashboard (percentil por fecha, umbrales por presupuesto de alarmas o limitación documentada).
+- [ ] Comparar el FWI intermedio con el consolidado en los meses que tengan ambos: el modelo se entrena con el consolidado y las predicciones recientes usan el intermedio (DEC-34, DEC-48).
+- [ ] Comprobar la calibración de la probabilidad con el walk-forward 2016-2022, sin usar el test de 2023 (DEC-47, DEC-49).
+- [ ] Acordar con Frontend el contrato de lectura de Gold: una predicción vigente por municipio y fecha, `v1-respaldo` como «estimación sin FWI», ausencias como «sin dato» y la probabilidad siempre junto al nivel (DEC-48, DEC-49).
+- [ ] Conectar `inferir.py` a `run_pipeline.py` con el rango de fechas (HU-11).
 
 ---
 
