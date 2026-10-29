@@ -84,3 +84,81 @@ def test_varios_modelos_exige_elegir(entorno, tmp_path):
             "--salida-predicciones", str(tmp_path / "p.parquet"), "--salida-explicaciones", str(tmp_path / "e.parquet")]
     assert inferir.main(args) == 2
     assert inferir.main(args + ["--modelo", entorno["id"]]) == 0
+
+
+# --- Dominio del modelo: variables que nunca faltaron al entrenar -----------------------------------
+FWI_NULO_DESDE = pd.Timestamp("2023-12-30")
+
+
+@pytest.fixture
+def entorno_fwi_nulo(entorno, tmp_path):
+    """Dataset con el FWI vacío en los últimos días y un modelo de respaldo sin FWI guardado."""
+    df = entorno["df"].copy()
+    df.loc[df["fecha"] >= FWI_NULO_DESDE, config.FWI_FEATURES] = np.nan
+    ruta = tmp_path / "dataset_municipio_dia.parquet"
+    df.to_parquet(ruta, index=False)
+    models = tmp_path / "models"
+    import shutil
+    shutil.copytree(entorno["models"], models)
+    b = train.train_model(entorno["df"], "xgboost", "sin_fwi", params={"n_estimators": 20, "max_depth": 3},
+                          anio_desde=2019, excluir=["viento"])
+    val = train.score_dataframe(b, splits.select_scenario(entorno["df"], "A", split="validacion"))
+    train.save_model(b, models)
+    risk.save_thresholds(risk.fit_risk_thresholds(val[config.TARGET], val["proba"], b.model_id), models)
+    return {"dataset": ruta, "models": models, "principal": entorno["id"], "respaldo": b.model_id, "df": df}
+
+
+def _a(e, tmp_path, *extra):
+    return ["--models-dir", str(e["models"]), "--dataset", str(e["dataset"]), "--modelo", e["principal"],
+            "--salida-predicciones", str(tmp_path / "p.parquet"), "--salida-explicaciones", str(tmp_path / "e.parquet"), *extra]
+
+
+def test_features_sin_nulos_detecta_las_que_nunca_faltaron(entorno):
+    df = entorno["df"].copy()
+    df.loc[df["particion"] == "entrenamiento", "temperatura"] = np.where(
+        np.arange((df["particion"] == "entrenamiento").sum()) % 7 == 0, np.nan, 1.0)
+    bundle, _ = inferir.cargar(entorno["models"], entorno["id"])
+    dom = inferir.features_sin_nulos(bundle, df)
+    assert "temperatura" not in dom and "fwi" in dom and "mes" in dom
+
+
+def test_sin_respaldo_las_filas_sin_fwi_no_se_predicen(entorno_fwi_nulo, tmp_path, capsys):
+    e = entorno_fwi_nulo
+    assert inferir.main(_a(e, tmp_path, "--desde", "2023-12-28", "--hasta", "2023-12-31")) == 0
+    pred = pd.read_parquet(tmp_path / "p.parquet")
+    assert pd.to_datetime(pred["fecha_objetivo"]).max() == pd.Timestamp("2023-12-30")     # D=29 es el último con FWI
+    assert pred["probabilidad"].notna().all() and (pred["version_modelo"] == "v1").all()
+    out = capsys.readouterr().out
+    assert "sin predicción" in out and "0 con el modelo de respaldo" in out
+
+
+def test_con_respaldo_se_predicen_con_el_modelo_sin_fwi(entorno_fwi_nulo, tmp_path):
+    e = entorno_fwi_nulo
+    assert inferir.main(_a(e, tmp_path, "--desde", "2023-12-28", "--hasta", "2023-12-31",
+                           "--modelo-respaldo", e["respaldo"])) == 0
+    pred, expl = pd.read_parquet(tmp_path / "p.parquet"), pd.read_parquet(tmp_path / "e.parquet")
+    n_mun = e["df"]["id_municipio"].nunique()
+    assert len(pred) == 4 * n_mun and pred["id_prediccion"].is_unique and pred["probabilidad"].notna().all()
+    resp = pred[pred["version_modelo"] == "v1-respaldo"]
+    assert len(resp) == 2 * n_mun and (pd.to_datetime(resp["fecha_objetivo"]) >= FWI_NULO_DESDE + pd.Timedelta(days=1)).all()
+    v_resp = expl[expl["id_prediccion"].isin(resp["id_prediccion"])]["variable"]
+    assert not set(v_resp) & set(config.FWI_FEATURES)          # el respaldo no usa el FWI
+    assert set(expl["id_prediccion"]) == set(pred["id_prediccion"])
+
+
+def test_ultimo_dia_fuera_de_dominio_falla_con_mensaje_claro(entorno_fwi_nulo, tmp_path, capsys):
+    e = entorno_fwi_nulo
+    assert inferir.main(_a(e, tmp_path)) == 2                      # el último día no tiene FWI
+    assert "modelo-respaldo" in capsys.readouterr().err
+    assert inferir.main(_a(e, tmp_path, "--modelo-respaldo", e["respaldo"])) == 0
+    assert (pd.read_parquet(tmp_path / "p.parquet")["version_modelo"] == "v1-respaldo").all()
+
+
+def test_reemplazar_borra_las_salidas_anteriores(entorno, tmp_path):
+    base = ["--models-dir", str(entorno["models"]), "--dataset", str(entorno["dataset"]),
+            "--salida-predicciones", str(tmp_path / "p.parquet"), "--salida-explicaciones", str(tmp_path / "e.parquet")]
+    assert inferir.main(base + ["--desde", "2023-12-01", "--hasta", "2023-12-02"]) == 0
+    assert inferir.main(base + ["--desde", "2023-12-10", "--hasta", "2023-12-10"]) == 0
+    assert len(pd.read_parquet(tmp_path / "p.parquet")) == 3 * entorno["df"]["id_municipio"].nunique()
+    assert inferir.main(base + ["--desde", "2023-12-10", "--hasta", "2023-12-10", "--reemplazar"]) == 0
+    assert len(pd.read_parquet(tmp_path / "p.parquet")) == entorno["df"]["id_municipio"].nunique()
