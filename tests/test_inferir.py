@@ -162,3 +162,51 @@ def test_reemplazar_borra_las_salidas_anteriores(entorno, tmp_path):
     assert len(pd.read_parquet(tmp_path / "p.parquet")) == 3 * entorno["df"]["id_municipio"].nunique()
     assert inferir.main(base + ["--desde", "2023-12-10", "--hasta", "2023-12-10", "--reemplazar"]) == 0
     assert len(pd.read_parquet(tmp_path / "p.parquet")) == entorno["df"]["id_municipio"].nunique()
+
+
+def test_con_informacion_ignora_el_mes():
+    class B:
+        features = ["temperatura", "humedad_relativa", "precipitacion", "mes"]
+    df = pd.DataFrame({"temperatura": [np.nan, 1.0, 1.0], "humedad_relativa": [np.nan, np.nan, 2.0],
+                       "precipitacion": [np.nan, np.nan, 0.0], "mes": [10, 10, 10]})
+    assert inferir.con_informacion(df, B(), 1).tolist() == [False, True, True]
+    assert inferir.con_informacion(df, B(), 2).tolist() == [False, False, True]
+
+
+def test_filas_sin_meteorologia_no_se_predicen_ni_con_respaldo(entorno_fwi_nulo, tmp_path, capsys):
+    e = entorno_fwi_nulo
+    df = pd.read_parquet(e["dataset"])
+    df.loc[df["fecha"] == "2023-12-31", config.METEO_FEATURES + ["racha_dias_secos", "precip_acum_7d"]] = np.nan
+    ruta = tmp_path / "sin_meteo.parquet"
+    df.to_parquet(ruta, index=False)
+    args = ["--models-dir", str(e["models"]), "--dataset", str(ruta), "--modelo", e["principal"],
+            "--modelo-respaldo", e["respaldo"], "--desde", "2023-12-28", "--hasta", "2023-12-31",
+            "--salida-predicciones", str(tmp_path / "p.parquet"), "--salida-explicaciones", str(tmp_path / "e.parquet")]
+    assert inferir.main(args) == 0
+    pred = pd.read_parquet(tmp_path / "p.parquet")
+    # D=31/12 no tiene FWI ni meteorología: sin predicción. D=30/12 (sin FWI, con meteorología): respaldo
+    assert pd.to_datetime(pred["fecha_objetivo"]).max() == pd.Timestamp("2023-12-31")
+    n = e["df"]["id_municipio"].nunique()
+    assert len(pred[pd.to_datetime(pred["fecha_objetivo"]) == "2023-12-31"]) == n
+    assert pred["probabilidad"].notna().all()
+    assert f"{n} sin predicción" in capsys.readouterr().out.replace(",", "").replace(".", "")
+
+
+def test_min_variables_mas_estricto_omite_filas_poco_informadas(entorno, tmp_path):
+    df = entorno["df"].copy()
+    rng = np.random.default_rng(1)
+    for c in ["temperatura", "humedad_relativa", "precipitacion"]:          # como en los datos reales: huecos al entrenar
+        df.loc[rng.random(len(df)) < 0.1, c] = np.nan
+    b = train.train_model(df, "xgboost", "con_fwi", params={"n_estimators": 20, "max_depth": 3},
+                          anio_desde=2019, excluir=["viento"])
+    val = train.score_dataframe(b, splits.select_scenario(df, "A", split="validacion"))
+    models = tmp_path / "m"
+    train.save_model(b, models)
+    risk.save_thresholds(risk.fit_risk_thresholds(val[config.TARGET], val["proba"], b.model_id), models)
+    df.loc[df["fecha"] == "2023-12-31", ["temperatura", "humedad_relativa", "precipitacion"]] = np.nan
+    ruta = tmp_path / "poca_info.parquet"
+    df.to_parquet(ruta, index=False)
+    base = ["--models-dir", str(models), "--dataset", str(ruta), "--desde", "2023-12-31", "--hasta", "2023-12-31",
+            "--salida-predicciones", str(tmp_path / "p.parquet"), "--salida-explicaciones", str(tmp_path / "e.parquet")]
+    assert inferir.main(base) == 0                                   # quedan FWI y derivadas con dato
+    assert inferir.main(base + ["--min-variables", "20"]) == 2       # ninguna fila llega a 20 variables

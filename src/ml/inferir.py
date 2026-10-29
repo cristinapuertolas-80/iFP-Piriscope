@@ -14,6 +14,10 @@ falta, el modelo no sabe qué hacer y devuelve valores arbitrarios. Esas filas N
 modelo: se predicen con `--modelo-respaldo` (p. ej. el modelo sin FWI, versión `<v>-respaldo`) o, si no
 se indica, se omiten. Nunca se escriben predicciones fuera del dominio.
 
+SIN INFORMACIÓN: una fila en la que todas las variables (salvo el mes) están vacías solo recibiría la
+"climatología" del mes: un valor casi constante cuyo nivel de riesgo lo decide el ruido. Esas filas
+tampoco se predicen (`--min-variables`, por defecto 1 variable con dato además del mes).
+
 OJO: para fechas dentro del entrenamiento o la validación (hasta 2022) las predicciones NO son
 out-of-sample; sirven para demostrar el flujo, no para evaluar el modelo.
 
@@ -60,6 +64,14 @@ def features_sin_nulos(bundle, todo: pd.DataFrame) -> list[str]:
     return [f for f in bundle.features if tr[f].notna().all()]
 
 
+def con_informacion(df: pd.DataFrame, bundle, minimo: int = 1) -> pd.Series:
+    """True en las filas con al menos `minimo` variables con dato (sin contar el mes, que es calendario)."""
+    informativas = [f for f in bundle.features if f != "mes"]
+    if not informativas:
+        return pd.Series(True, index=df.index)
+    return df[informativas].notna().sum(axis=1) >= minimo
+
+
 def separar_por_dominio(todo: pd.DataFrame, bundle, desde: pd.Timestamp, hasta: pd.Timestamp):
     """Filas del rango [desde, hasta] dentro y fuera del dominio del modelo."""
     f = pd.to_datetime(todo[config.COL_FECHA]).dt.normalize()
@@ -103,6 +115,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--hasta", default=None, help="último día D")
     ap.add_argument("--modelo-respaldo", default=None,
                     help="modelo para las filas fuera del dominio del principal (p. ej. el modelo sin FWI)")
+    ap.add_argument("--min-variables", type=int, default=1,
+                    help="mínimo de variables con dato (sin contar el mes) para predecir una fila")
     ap.add_argument("--reemplazar", action="store_true", help="borra las salidas existentes antes de escribir")
     ap.add_argument("--top-k", type=int, default=5)
     ap.add_argument("--salida-predicciones", type=Path, default=config.PREDICCIONES_PARQUET)
@@ -126,6 +140,8 @@ def main(argv: list[str] | None = None) -> int:
         desde, hasta = desde or fechas.min(), hasta or fechas.max()
 
         dentro, fuera = separar_por_dominio(todo, bundle, desde, hasta)
+        info = con_informacion(dentro, bundle, a.min_variables)
+        n_sin_info, dentro = int((~info).sum()), dentro[info]
         preds, expls, principal = [], [], None
         if not dentro.empty:
             principal = predict.build_predictions(dentro, bundle, thr, desde=desde, hasta=hasta)
@@ -136,6 +152,7 @@ def main(argv: list[str] | None = None) -> int:
             b2, t2 = cargar(a.models_dir, a.modelo_respaldo)
             dom2 = features_sin_nulos(b2, todo)
             ok = fuera[~fuera[dom2].isna().any(axis=1)] if dom2 else fuera
+            ok = ok[con_informacion(ok, b2, a.min_variables)]
             if not ok.empty:
                 p2 = predict.build_predictions(ok, b2, t2, desde=desde, hasta=hasta,
                                                version_modelo=f"{b2.version}-respaldo")
@@ -143,8 +160,9 @@ def main(argv: list[str] | None = None) -> int:
                 expls.append(shap_explain.build_explanations(p2, todo, b2, top_k=a.top_k))
                 n_respaldo = len(p2)
         if not preds:
-            raise ValueError("No hay filas predecibles en el rango: todas quedan fuera del dominio del modelo "
-                             "(¿falta el FWI de los últimos días?). Usa --modelo-respaldo con el modelo sin FWI")
+            raise ValueError("No hay filas predecibles en el rango: todas quedan fuera del dominio del modelo o sin "
+                             "datos suficientes (¿falta el FWI o la meteorología de los últimos días?). "
+                             "Prueba --modelo-respaldo con el modelo sin FWI")
         pred = pd.concat(preds, ignore_index=True)
         expl = pd.concat(expls, ignore_index=True)
         sin_prediccion = len(fuera) - n_respaldo
@@ -169,6 +187,9 @@ def main(argv: list[str] | None = None) -> int:
     print("Niveles de riesgo en la última fecha:", ultimo["nivel_riesgo"].value_counts().reindex(config.RISK_LEVELS, fill_value=0).to_dict())
     top = ultimo.nlargest(5, "probabilidad")[["id_municipio", "fecha_objetivo", "probabilidad", "nivel_riesgo", "fwi"]]
     print(top.assign(probabilidad=top["probabilidad"].round(4), fwi=top["fwi"].round(2)).to_string(index=False))
+    if n_sin_info:
+        print(f"Sin información suficiente (menos de {a.min_variables} variable(s) con dato, sin contar el mes): "
+              f"{n_sin_info:,} filas del modelo principal sin predicción")
     if n_respaldo or sin_prediccion:
         print(f"Fuera del dominio del modelo principal (falta alguna variable que nunca faltó al entrenar): "
               f"{len(fuera):,} filas -> {n_respaldo:,} con el modelo de respaldo, {sin_prediccion:,} sin predicción")
