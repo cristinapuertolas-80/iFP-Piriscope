@@ -210,3 +210,29 @@ def test_min_variables_mas_estricto_omite_filas_poco_informadas(entorno, tmp_pat
             "--salida-predicciones", str(tmp_path / "p.parquet"), "--salida-explicaciones", str(tmp_path / "e.parquet")]
     assert inferir.main(base) == 0                                   # quedan FWI y derivadas con dato
     assert inferir.main(base + ["--min-variables", "20"]) == 2       # ninguna fila llega a 20 variables
+
+def test_reejecutar_no_duplica(entorno, tmp_path):
+    a = _args(entorno, tmp_path, "--desde", "2023-12-01", "--hasta", "2023-12-02")
+    assert inferir.main(a) == 0 and inferir.main(a) == 0
+    pred = pd.read_parquet(tmp_path / "p.parquet")
+    assert not pred.duplicated(["id_municipio", "fecha_objetivo"]).any()
+    assert len(pred) == 2 * entorno["df"]["id_municipio"].nunique()
+
+
+def test_v1_sustituye_a_v1_respaldo(entorno, entorno_fwi_nulo, tmp_path):
+    e = entorno_fwi_nulo
+    rango = ["--desde", "2023-12-29", "--hasta", "2023-12-31"]
+    assert inferir.main(_a(e, tmp_path, *rango, "--modelo-respaldo", e["respaldo"])) == 0
+    assert (pd.read_parquet(tmp_path / "p.parquet")["version_modelo"] == "v1-respaldo").any()
+    e2 = {**e, "dataset": entorno["dataset"]}            # llega el FWI
+    assert inferir.main(_a(e2, tmp_path, *rango, "--modelo-respaldo", e["respaldo"])) == 0
+    pred, expl = pd.read_parquet(tmp_path / "p.parquet"), pd.read_parquet(tmp_path / "e.parquet")
+    assert not pred.duplicated(["id_municipio", "fecha_objetivo"]).any()
+    assert (pred["version_modelo"] == "v1").all()
+    assert set(expl["id_prediccion"]) == set(pred["id_prediccion"])
+
+
+def test_error_en_ejemplo_no_bloquea_salidas(entorno, tmp_path):
+    assert inferir.main(_args(entorno, tmp_path, "--ejemplo-dir", str(tmp_path / "ej"),
+                              "--ejemplo-municipio", "99999")) == 2
+    assert (tmp_path / "p.parquet").exists() and (tmp_path / "e.parquet").exists()
