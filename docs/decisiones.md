@@ -57,6 +57,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 | [DEC-45](#dec-45-selección-de-municipios-reservados) | Selección de municipios reservados | Validación / Modelo | Aceptada |
 | [DEC-46](#dec-46-dataset-de-gold-variables-derivadas-y-etiqueta) | Dataset de Gold: variables derivadas y etiqueta | Pipeline de datos / Modelo | Aceptada |
 | [DEC-47](#dec-47-configuración-del-modelo-y-protocolo-de-evaluación) | Configuración del modelo y protocolo de evaluación | Modelo / Evaluación | Aceptada |
+| [DEC-48](#dec-48-inferencia-real-dominio-del-modelo-modelo-de-respaldo-y-filas-sin-predicción) | Inferencia real: dominio del modelo, modelo de respaldo y filas sin predicción | Modelo / Arquitectura | Aceptada |
 
 ---
 
@@ -458,6 +459,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 - **Contexto:** DEC-12, DEC-14 y DEC-15 establecen que las predicciones se calculan en batch y se escriben en Gold con trazabilidad.
 - **Decisión:** para cada municipio con fila del día D se predice D+1 (`fecha_objetivo = D + 1`). `predicciones.parquet` contiene `id_prediccion`, `id_municipio`, `fecha_objetivo`, `version_modelo`, `probabilidad`, `nivel_riesgo`, `fwi` (copia del día D) y `fecha_insert`. `explicaciones.parquet` contiene `id_prediccion`, `variable` y `valor_shap`. Ambas escrituras sobrescriben las filas con el mismo `id_prediccion` y conservan el resto. Por defecto se predice el último día disponible, y se admite un rango de fechas. En producción se predicen todos los municipios, reservados incluidos.
 - **Consecuencias:** `version_modelo` (p. ej. `v1`) forma parte del id. Las variantes del modelo comparten versión y se distinguen en el nombre del fichero; en producción solo predice una, así que no hay colisión.
+- **Ampliada por DEC-48:** `version_modelo` puede valer `<versión>-respaldo` (predicción con el modelo sin FWI) y una fecha puede tener menos de 313 municipios, porque no se predicen las filas fuera del dominio del modelo ni las que no tienen ninguna variable con dato. La inferencia se ejecuta con `python -m src.ml.inferir`.
 
 ### DEC-43. Explicabilidad SHAP y gráficos desde Gold
 
@@ -467,6 +469,8 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 - **Decisión:** `TreeExplainer` sobre la fila del día D de cada predicción. Se guardan las 5 variables de mayor |SHAP| por predicción y se calcula la importancia global (media de |SHAP|). Las unidades son **log-odds en XGBoost** y **probabilidad en Random Forest** (`shap_units`). Los gráficos (Plotly) se construyen a partir de las tablas de Gold, sin cargar el modelo, con paleta apta para daltonismo y el sentido de cada contribución (sube o baja el riesgo) también en texto.
 - **Alternativas descartadas:** guardar todas las variables (más volumen y poco valor en el dashboard); guardar el valor de cada variable, porque el esquema del Anexo A no tiene esa columna.
 - **Consecuencias:** con solo `explicaciones.parquet` el dashboard no puede mostrar «temperatura = 31 °C»; habría que cruzar con Gold o ampliar el esquema (a acordar con Frontend). Los valores en log-odds y en probabilidad no son comparables entre algoritmos.
+- Las explicaciones de las filas de respaldo (DEC-48) se calculan con el modelo de respaldo, así que no incluyen variables del FWI. Las figuras de ejemplo (`inferir.py --ejemplo-dir`) se generan siempre con el modelo principal y la última fecha predicha con él; la importancia global se calcula sobre la validación de municipios no reservados.
+- Un primer ejemplo generado con las filas sin FWI (municipio 15015, 2026-10-22) se descartó por ser un artefacto del dato ausente (DEC-48); el ejemplo vigente es el municipio 32031 el 2026-10-19.
 
 ### DEC-44. Persistencia y versionado de modelos
 
@@ -474,7 +478,8 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 - **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-explainability
 - **Contexto:** DEC-11 y DEC-17 prevén modelos serializados y versionados en `models/`.
 - **Decisión:** cada modelo se guarda con `joblib` en `models/<versión>_<algoritmo>_<variante>.joblib`, junto a un `.json` con versión, semilla, variables, parámetros, número de filas y fecha de entrenamiento, y un `_umbrales.json` (DEC-41).
-- **Consecuencias:** los `.joblib` son pickles, así que solo se cargan ficheros generados por el propio proyecto. Los modelos de Random Forest pueden pesar mucho: pendiente decidir si `models/` se aloja en Hugging Face en vez de GitHub.
+- **Consecuencias:** los `.joblib` son pickles, así que solo se cargan ficheros generados por el propio proyecto. Los modelos de Random Forest pueden pesar mucho:~~pendiente decidir si `models/` se aloja en Hugging Face en vez de GitHub~~.
+- **Decidido:** los `.joblib` no se suben al repositorio (son *pickles* y los binarios no se pueden revisar en un PR); se versionan los `.json` de metadatos y de umbrales, que documentan cada versión. Los dos modelos finales (`con_fwi` y `sin_fwi`, que necesita la inferencia por DEC-48) se publican en Hugging Face cuando se cierre la entrega..
 
 ### DEC-45. Selección de municipios reservados
 
@@ -544,7 +549,30 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
   - **Información nueva** (día del año en lugar del mes, evolución meteorológica reciente, historial de incendios del municipio) queda para una iteración futura; la última requeriría revisar DEC-25.
   - El modelo para operación podrá reentrenarse con los años de validación y test una vez cerrada la evaluación (HU-11).
   - El primer informe final incluyó los años 2001-2008 en el escenario B por un error del script; se corrigió y el informe conserva ambas versiones. No cambió el modelo ni los parámetros.
-  
+  - **Corrección del informe final:** la primera ejecución incluyó en el escenario B los años 2001-2008, que el modelo no vio (se entrenó desde 2009), por un error del script. Con esos años, `sin_fwi` salía peor que el FWI (−0,018): un artefacto de la falta de meteorología en esos años. Se corrigió (B se recorta a los años de entrenamiento) y el informe conserva ambas versiones (`B` y `B-todos-los-anios`). A y C no cambiaron; no se modificó el modelo ni ningún parámetro.
+  - **Aviso derivado de DEC-48:** el modelo con FWI solo es válido cuando el FWI está disponible; en los días recientes sin FWI se usa el modelo sin FWI, que no mejora al FWI.
+
+### DEC-48. Inferencia real: dominio del modelo, modelo de respaldo y filas sin predicción
+
+- **Fecha:** 2026-10-29 · **Estado:** Aceptada
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-inference
+- **Contexto:** la primera inferencia real con el modelo `con_fwi` (2024-01-02 a 2026-10-22) mostró que las tres últimas fechas objetivo (20, 21 y 22 de octubre) no tenían FWI en ninguno de los 313 municipios, porque el FWI llega con unos días de retraso respecto a la meteorología. El modelo se entrenó desde 2009 (DEC-47), años en los que el FWI nunca falta, y XGBoost no sabe qué hacer con un hueco que no ha visto: devolvió probabilidades arbitrarias de entre 0,034 y 0,18 y puso al 100 % de los municipios en «medio» o «alto» (301 de 313 en «alto» el día 22). La figura SHAP de ejemplo de esa ejecución lo reflejaba: sus cinco barras eran componentes del FWI vacío.
+- **Decisión:**
+  - **Dominio del modelo:** el script calcula qué variables no tuvieron ningún nulo en las filas de entrenamiento (aquí, el FWI y sus cinco componentes y `mes`). Si una de ellas falta en una fila, esa fila queda **fuera del dominio** y no se predice con ese modelo.
+  - **Modelo de respaldo (`--modelo-respaldo`):** las filas fuera del dominio se predicen con el modelo sin FWI (`sin_fwi`), con sus propios umbrales de riesgo y sus propias explicaciones SHAP (que no usan variables del FWI). Se marcan con `version_modelo = <versión>-respaldo` (p. ej. `v1-respaldo`), y el `id_prediccion` las distingue.
+  - **Filas sin información (`--min-variables`, por defecto 1):** una fila en la que todas las variables, salvo el mes, están vacías no se predice, ni con el modelo principal ni con el de respaldo. Solo recibiría la «climatología» del mes: un valor casi constante cuyo nivel de riesgo lo decide el ruido.
+  - **Lo que no se puede predecir se omite:** no se rellena ni se inventa un nivel. En `predicciones.parquet` simplemente no hay fila para ese municipio y fecha, y el dashboard lo muestra como «sin dato». No se añade un cuarto nivel a `nivel_riesgo`, para respetar el esquema de `Prediccion` (bajo, medio, alto).
+  - **`--reemplazar`:** borra las salidas existentes antes de escribir. Es necesario al regenerar fechas cuya versión cambia (`v1` pasa a `v1-respaldo`), porque el `id_prediccion` incluye la versión y las filas antiguas no se sobrescribirían.
+- **Resultado (2024-01-02 a 2026-10-22):** 320.750 predicciones de 320.825 posibles. 319.886 con el modelo principal (`v1`), 864 con el de respaldo (`v1-respaldo`, fechas 20 a 22 de octubre, sin FWI) y 75 sin predicción (25 municipios sin ninguna variable meteorológica con dato, por 3 fechas). Los 25 municipios excluidos eran justo los que antes salían en «medio» con el valor de «sin información» (~0,022).
+- **Alternativas descartadas:** dejar que XGBoost trate el FWI vacío (valores arbitrarios, como se comprobó); imputar el FWI con el último valor disponible (introduce un dato inventado y el FWI cambia con rapidez en los días críticos); reentrenar permitiendo FWI vacío (no hay ejemplos desde 2009 con los que aprenderlo, y volver a incluir los años anteriores empeora los datos); añadir un nivel «sin dato» a `nivel_riesgo`.
+- **Consecuencias:**
+  - **Los 2 o 3 últimos días se predicen siempre con el respaldo**, mientras el FWI llegue con retraso. Según DEC-47, el modelo sin FWI equivale al FWI, no lo mejora: esas predicciones son menos fiables.
+  - **Las predicciones de respaldo varían poco:** dependen solo de la meteorología de la estación (7 a 16 valores distintos por fecha, de 0,019 a 0,027, frente a 115 en un día normal con el modelo completo).
+  - **Para el dashboard:** `v1-respaldo` debe mostrarse como «estimación sin FWI», y los municipios y fechas ausentes, como «sin dato». Una fecha puede tener menos de 313 municipios.
+  - La inferencia necesita guardados **los dos modelos** (`con_fwi` y `sin_fwi`) con sus umbrales.
+  - Si en el futuro se añaden al modelo más variables con cobertura total, entran automáticamente en el dominio.
+  - Las filas de 2024 a 2026 no tienen etiqueta (EGIF no llega); las de fechas hasta 2022 no son *out-of-sample* (el modelo se entrenó con 2009-2021 y paró en 2022): sirven para demostrar el flujo, no para evaluar.
+
 ---
 
 ## Decisiones pendientes
@@ -566,6 +594,12 @@ Se cerrarán durante la adquisición y el EDA y se registrarán como nuevas entr
 - [ ] Valor de cada variable junto a su contribución SHAP en el dashboard: ampliar el esquema o cruzar con Gold (DEC-43).
 - [ ] Revisar los umbrales de los niveles de riesgo con el informe final y con la calibración (DEC-41, DEC-47).
 - [ ] Valorar nueva información para el modelo (día del año, tendencia reciente, historial municipal) en una iteración futura (DEC-47, DEC-25).
+- [ ] Calibrar la probabilidad o presentarla como índice de riesgo en el dashboard: el modelo se entrena con una prevalencia del ~2 % y en 2023 fue del 0,75 % (DEC-47).
+- [ ] Dashboard: mostrar `v1-respaldo` como «estimación sin FWI» y las ausencias como «sin dato» (DEC-48).
+- [ ] Reducir los días de respaldo: valorar una fuente de FWI más reciente (el retraso actual es de 2 a 3 días) (DEC-48).
+- [ ] Valorar umbrales de riesgo distintos por época del año: con el Recall del 80 %, en agosto el 82 % de los municipio-días entra en «medio o superior» (DEC-41).
+- [ ] Subir los modelos finales a Hugging Face y enlazarlos (DEC-44).
+- [ ] Contrastar con las estadísticas oficiales si las etiquetas de 2022 y 2023 son definitivas (DEC-31, DEC-21).
 
 ---
 
