@@ -165,8 +165,8 @@ def calcular_avisos(pred: pd.DataFrame, todo: pd.DataFrame, bundle, d_ult: pd.Ti
     if not alta.empty:
         fechas = ", ".join(f"{d:%Y-%m-%d} ({p:.0%})" for d, p in alta.head(5).items())
         avisos.append(f"{len(alta)} fecha(s) con >= {aviso_alarmas:.0%} de municipios en medio o alto: {fechas}. "
-                      "Si todas las filas son del modelo principal (con FWI) suele ser sequía real: los umbrales absolutos "
-                      "pierden capacidad de discriminar. Si hay filas de respaldo o con nulos, revisa los datos de entrada")
+                      "Si todas son filas del modelo principal (con FWI) suele ser sequía real: los umbrales absolutos "
+                      "pierden capacidad de discriminar (DEC-49). Si hay filas de respaldo o con nulos, revisa los datos de entrada")
 
     ult = todo[pd.to_datetime(todo[config.COL_FECHA]).dt.normalize() == d_ult]
     meteo = [c for c in getattr(config, "METEO_FEATURES", []) if c in bundle.features and c in ult.columns]

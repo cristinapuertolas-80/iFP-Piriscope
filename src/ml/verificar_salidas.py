@@ -102,8 +102,14 @@ def main() -> int:
 
     # --- Plausibilidad
     alarma = p["nivel_riesgo"].isin(["medio", "alto"]).groupby(p["fecha_objetivo"]).mean()
-    comprobar((alarma < a.max_alarmas).all(), f"ninguna fecha con >= {a.max_alarmas:.0%} en medio o alto",
-              f"máximo {alarma.max():.0%} el {alarma.idxmax():%Y-%m-%d}")
+    saturadas = alarma[alarma >= a.max_alarmas]
+    con_respaldo = set(p.loc[resp, "fecha_objetivo"])
+    sospechosas = [d for d in saturadas.index if d in con_respaldo]
+    comprobar(not sospechosas, "ninguna fecha saturada que incluya filas de respaldo (posible artefacto de datos)",
+              ", ".join(f"{d:%Y-%m-%d}" for d in sospechosas[:5]))
+    if len(saturadas):
+        print(f"[AVISO] {len(saturadas)} fecha(s) con >= {a.max_alarmas:.0%} en medio o alto, solo con modelo principal "
+              f"(suele ser sequía real, ver DEC-49); máximo {alarma.max():.0%} el {alarma.idxmax():%Y-%m-%d}")
     ult = p[p["fecha_objetivo"] == p["fecha_objetivo"].max()]
     print(f"       última fecha: {ult['nivel_riesgo'].value_counts().to_dict()}; "
           f"{ult['probabilidad'].nunique()} probabilidades distintas")
