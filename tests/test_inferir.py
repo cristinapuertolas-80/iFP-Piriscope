@@ -236,3 +236,48 @@ def test_error_en_ejemplo_no_bloquea_salidas(entorno, tmp_path):
     assert inferir.main(_args(entorno, tmp_path, "--ejemplo-dir", str(tmp_path / "ej"),
                               "--ejemplo-municipio", "99999")) == 2
     assert (tmp_path / "p.parquet").exists() and (tmp_path / "e.parquet").exists()
+
+# --- Avisos, escritura atómica y exigencia propia del respaldo -------------------------------------
+def test_avisos_de_cobertura_alarmas_y_nulos(entorno):
+    todo = entorno["df"].copy()
+    d = pd.Timestamp("2023-12-31")
+    todo.loc[todo["fecha"] == d, "temperatura"] = np.nan                    # 100 % sin temperatura el día D
+    muns = todo["id_municipio"].unique()
+    pred = pd.DataFrame({"id_municipio": muns[:2], "fecha_objetivo": d + pd.Timedelta(days=1),
+                         "nivel_riesgo": "alto"})                          # 2 de 8 municipios, todos en alarma
+    bundle, _ = inferir.cargar(entorno["models"], entorno["id"])
+    avisos = " | ".join(inferir.calcular_avisos(pred, todo, bundle, d, min_cobertura=0.8, aviso_alarmas=0.95))
+    assert "cobertura por debajo" in avisos and "en medio o alto" in avisos and "sin temperatura" in avisos
+
+
+def test_sin_avisos_si_todo_va_bien(entorno):
+    todo = entorno["df"]
+    d = todo["fecha"].max()
+    pred = pd.DataFrame({"id_municipio": todo["id_municipio"].unique(), "fecha_objetivo": d + pd.Timedelta(days=1),
+                         "nivel_riesgo": "bajo"})
+    bundle, _ = inferir.cargar(entorno["models"], entorno["id"])
+    assert inferir.calcular_avisos(pred, todo, bundle, d, 0.8, 0.95) == []
+
+
+def test_escritura_atomica_si_falla_no_toca_lo_existente(entorno, tmp_path, monkeypatch):
+    base = _args(entorno, tmp_path, "--desde", "2023-12-01", "--hasta", "2023-12-02")
+    assert inferir.main(base) == 0
+    antes = ((tmp_path / "p.parquet").read_bytes(), (tmp_path / "e.parquet").read_bytes())
+
+    def falla(*a, **k):
+        raise OSError("disco lleno")
+    monkeypatch.setattr(inferir.shap_explain, "write_explanations", falla)
+    with pytest.raises(OSError):
+        inferir.main(_args(entorno, tmp_path, "--desde", "2023-12-10", "--hasta", "2023-12-10"))
+    assert ((tmp_path / "p.parquet").read_bytes(), (tmp_path / "e.parquet").read_bytes()) == antes
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_min_variables_respaldo_propio(entorno_fwi_nulo, tmp_path, capsys):
+    e = entorno_fwi_nulo
+    args = _a(e, tmp_path, "--desde", "2023-12-28", "--hasta", "2023-12-31", "--modelo-respaldo", e["respaldo"])
+    assert inferir.main(args + ["--min-variables-respaldo", "99"]) == 0
+    pred = pd.read_parquet(tmp_path / "p.parquet")
+    assert (pred["version_modelo"] == "v1").all()                           # el respaldo no llega a 99 variables
+    assert pd.to_datetime(pred["fecha_objetivo"]).max() == pd.Timestamp("2023-12-30")
+    assert "sin predicción" in capsys.readouterr().out

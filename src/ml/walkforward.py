@@ -7,8 +7,16 @@ año Y-1 para parar el entrenamiento y fijar los umbrales, y se evalúa en Y.
 Protección del test: solo se usan municipios NO reservados y años anteriores al año de test del
 dataset; nunca se tocan el test ni la partición geográfica.
 
+Con `--guardar-predicciones RUTA.parquet` se guardan, por año y variante, las probabilidades de la
+validación (año Y-1) y de la evaluación (año Y), más los umbrales de riesgo ajustados en Y-1
+(`RUTA_umbrales.csv`). Sirven para estudiar políticas de niveles con todos los años (DEC-49).
+
 Uso:
     python -m src.ml.walkforward --anio-desde 2009 --excluir viento --param scale_pos_weight=1
+    # reproducir sin tocar el informe actual y guardando predicciones:
+    python -m src.ml.walkforward --anio-desde 2009 --excluir viento --param scale_pos_weight=1 \\
+        --bootstrap 20 --salida docs/resultados/dev/informe_walkforward_repro.csv \\
+        --guardar-predicciones docs/resultados/dev/walkforward_predicciones.parquet
 """
 from __future__ import annotations
 
@@ -19,7 +27,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import config, evaluate, splits, train
+from . import config, evaluate, risk, splits, train
 from .experimento import COLUMNAS_DIF, con_bloques, parsear_params
 
 COLUMNAS = ["anio", "variante", "sistema", "n", "n_pos", "prevalencia", "auc_pr", "auc_pr_lo", "auc_pr_hi",
@@ -38,7 +46,8 @@ def preparar_pliegue(df: pd.DataFrame, anio: int) -> pd.DataFrame:
 
 def correr_pliegue(df: pd.DataFrame, anio: int, algoritmo: str, variante: str, recall_objetivo: float,
                    n_boot: int, bloque_dias: int, params: dict | None, anio_desde: int | None,
-                   excluir: list[str] | None) -> pd.DataFrame:
+                   excluir: list[str] | None, extra: list | None = None) -> pd.DataFrame:
+    """Si `extra` es una lista, añade (predicciones del pliegue, umbrales de riesgo del pliegue)."""
     d = preparar_pliegue(df, anio)
     bundle = train.train_model(d, algoritmo, variante, "wf", params=params, anio_desde=anio_desde, excluir=excluir)
     val = train.score_dataframe(bundle, splits.select_scenario(d, "A", split=config.PART_VAL))
@@ -46,6 +55,14 @@ def correr_pliegue(df: pd.DataFrame, anio: int, algoritmo: str, variante: str, r
     test = train.score_dataframe(bundle, splits.select_scenario(d, "A", split=config.PART_TEST))
     if test.empty:
         raise ValueError(f"El año {anio} no tiene filas de evaluación")
+    if extra is not None:
+        cols = [c for c in (config.COL_MUNICIPIO, config.COL_FECHA, config.TARGET, config.BASELINE_COL, "proba")
+                if c in val.columns and c in test.columns]
+        pr = pd.concat([val[cols].assign(conjunto="validacion"), test[cols].assign(conjunto="evaluacion")],
+                       ignore_index=True)
+        riesgo = risk.fit_risk_thresholds(val[config.TARGET], val["proba"], bundle.model_id)
+        extra.append((pr.assign(anio=anio, variante=bundle.variant),
+                      {"anio": anio, "variante": bundle.variant, "medio": riesgo.medio, "alto": riesgo.alto}))
     test, col = con_bloques(test, bloque_dias)
     rep = evaluate.compare_model_vs_baseline(test, umbrales, n_boot=n_boot, by_province=False, col_bloque=col)
     x = test.dropna(subset=[config.TARGET, "proba", config.BASELINE_COL])
@@ -93,7 +110,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--bootstrap", type=int, default=200)
     ap.add_argument("--bloque-dias", type=int, default=7)
     ap.add_argument("--salida", type=Path, default=config.GOLD_DIR / "informe_walkforward.csv")
+    ap.add_argument("--guardar-predicciones", type=Path, default=None, metavar="RUTA.parquet",
+                    help="guarda las probabilidades de cada pliegue y sus umbrales de riesgo (RUTA_umbrales.csv)")
     a = ap.parse_args(argv)
+    if a.salida.exists():
+        print(f"AVISO: se sobrescribirá {a.salida}", file=sys.stderr)
+    extra = [] if a.guardar_predicciones else None
 
     try:
         df = pd.read_parquet(a.dataset)
@@ -109,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
             for variante in a.variantes:
                 print(f"Pliegue {anio} · {variante} ...", flush=True)
                 partes.append(correr_pliegue(df, anio, a.algoritmo, variante, a.recall_objetivo, a.bootstrap,
-                                             a.bloque_dias, params, a.anio_desde, a.excluir))
+                                             a.bloque_dias, params, a.anio_desde, a.excluir, extra))
     except FileNotFoundError:
         print(f"ERROR: no existe {a.dataset}. Genera Gold con `python -m src.features`.", file=sys.stderr)
         return 2
@@ -124,6 +146,12 @@ def main(argv: list[str] | None = None) -> int:
     print("\n" + res.to_string(index=False))
     print("\n" + veredicto(res).to_string(index=False))
     print(f"\nInforme completo: {a.salida}")
+    if extra:
+        a.guardar_predicciones.parent.mkdir(parents=True, exist_ok=True)
+        pd.concat([p for p, _ in extra], ignore_index=True).to_parquet(a.guardar_predicciones, index=False)
+        umb = a.guardar_predicciones.with_name(a.guardar_predicciones.stem + "_umbrales.csv")
+        pd.DataFrame([u for _, u in extra]).to_csv(umb, index=False)
+        print(f"Predicciones: {a.guardar_predicciones}\nUmbrales de riesgo por pliegue: {umb}")
     return 0
 
 
