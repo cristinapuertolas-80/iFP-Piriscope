@@ -1,6 +1,6 @@
 # Contrato de datos entre ML y Dashboard (capa Gold)
 
-**Versión:** 1.1 · **Fecha:** 2026-10-30 · **Responsable ML:** Hikari · **Consumidor:** Frontend (Streamlit)
+**Versión:** 1.2 · **Fecha:** 2026-10-30 · **Responsable ML:** Hikari · **Consumidor:** Frontend (Streamlit)
 **Decisiones relacionadas:** DEC-12, DEC-14, DEC-41, DEC-42, DEC-43, DEC-47, DEC-48, DEC-49
 
 El dashboard **solo lee ficheros Parquet de `data/gold/`**. No carga modelos, no lee Bronze ni Silver y no accede a fuentes externas (NF2, apartado 5.6). Este documento fija qué garantiza Gold y qué debe hacer el dashboard con cada caso.
@@ -101,7 +101,7 @@ Usa siempre `nivel_riesgo`. **No recalcules niveles a partir de la probabilidad*
 | medio o superior | p ≥ 0,0273 | p ≥ 0,0220 | Recall 0,80 en validación 2022; 0,73 en el test de 2023 (intervalo 0,62-0,81) |
 | alto | p ≥ 0,0449 | p ≥ 0,0241 | Recall 0,50 en validación 2022 (no medido en el test) |
 
-Estos umbrales son los de DEC-41 y **pueden cambiar** con DEC-49. Por eso el dashboard no debe fijarlos en el código.
+Estos umbrales son los de DEC-41 y **pueden cambiar** con DEC-49. Por eso el dashboard no debe fijarlos en el código. Se reajustan con cada reentrenamiento. El número de alarmas varía mucho de un año a otro (con «medio», entre el 21 y el 39 % de los municipio-días en el walk-forward 2016-2022) y de un mes a otro: no usar el recuento de municipios en «medio» o «alto» como indicador de gravedad regional.
 
 **Texto sugerido** para la leyenda: «*Medio o alto* significa *no descartar*, no *habrá un incendio*. Entre 1 de cada 16 y 1 de cada 50 alarmas coincide con un incendio, según el año». (Precision de 2,0 % en el test de 2023 y de 2,3 % a 6,1 % en el walk-forward 2016-2022; depende de la tasa base del año).
 
@@ -114,7 +114,7 @@ Las filas `v1-respaldo` tienen **menos capacidad de discriminar** (equivalen al 
 ### 4.3 Probabilidad
 
 - Mostrarla como **«índice de riesgo»** (por ejemplo, «Índice de riesgo: 4,3 %»), **siempre junto al nivel**.
-- No presentarla como probabilidad exacta: en validación 2022 el modelo sobrestimó la tasa real ~1,5 veces, y la tasa base cambia de un año a otro.
+- No presentarla como probabilidad exacta: en el walk-forward 2016-2022 el modelo sobrestimó la tasa real entre 1,5 y 2,4 veces según el año (1,7 en conjunto), y la tasa base cambia de un año a otro.
 - No comparar índices entre años ni entre `v1` y `v1-respaldo`.
 
 ### 4.4 Prioridad relativa dentro del día (complementaria, provisional)
@@ -126,7 +126,7 @@ dia = dia.assign(prioridad_dia = 1 - dia.groupby("version_modelo")["probabilidad
 # 0 = el municipio de mayor riesgo del día; 0,10 = dentro del 10 % superior
 ```
 
-Mostrarla como «Prioridad relativa hoy: top 12 %». **No usarla para definir el nivel.** En días saturados aporta señal modesta (lift 1,4–1,7 en validación). Su inclusión depende del cierre de DEC-49.
+Mostrarla como «Prioridad relativa hoy: top 12 %». **No usarla para definir el nivel.** En días saturados aporta señal modesta pero estable: en los siete años del walk-forward, el top 10 % de cada día concentra los incendios entre 1,5 y 2,1 veces mejor que el azar (1,8 en conjunto). Está propuesta en DEC-49, pendiente de confirmar por el equipo.
 
 ### 4.5 Fecha por defecto y frescura
 
@@ -260,6 +260,8 @@ La figura ya cumple la accesibilidad: el sentido de cada barra se indica tambié
 | C-test | 0,74 % | 0,0381 | 0,0212 | +0,0169 (+0,0028 a +0,0369) |
 
 El modelo `sin_fwi` (el que genera las filas `v1-respaldo`) **no mejora** al FWI en ningún escenario global (A-test +0,0027, B +0,0002, C-test +0,0007; los intervalos incluyen el cero).
+
+En el walk-forward 2016-2022, **a igualdad de alarmas** el modelo captura entre un 14 % y un 19 % más incendios que el FWI (con el 20 % de los municipio-días marcados: 69 % frente a 60,5 %; con el 10 %: 47 % frente a 40 %; con el 5 %: 31 % frente a 26 %). Son cifras conjuntas, sin intervalos: usar solo como contexto.
 
 ### 11.3 Cómo presentarlo
 
