@@ -88,6 +88,19 @@ def main() -> None:
     }).round(2)
     print("\n== 4. % de municipio-días marcados por mes (2022)")
     print(por_mes.to_string())
+    # 5. Ranking dentro de los días saturados (>= 50 % de municipios sobre «medio»)
+    sat = (p >= thr.medio).groupby(fecha).transform("mean") >= 0.5
+    ys, rs = y[sat], rango[sat]
+    if ys.sum():
+        base = ys.mean()
+        filas5 = {}
+        for x in (0.1, 0.2, 0.3):
+            m = metricas(ys, rs <= x)
+            m["lift"] = m["precision"] / base
+            filas5[f"top {x:.0%} del día"] = m
+        print(f"\n== 5. Solo días saturados ({sat.mean():.0%} de las filas, prevalencia {base:.2%}): ¿ordena bien los municipios?")
+        print(pd.DataFrame(filas5).T.round(3).to_string())
+        print("lift > 1: el ranking dentro del día concentra los incendios mejor que el azar.")
     print("\nLectura: el top-x % por día marca siempre lo mismo (también en invierno, con riesgo despreciable); "
           "el híbrido evita eso exigiendo además superar el umbral «medio». Elige según cuántas alarmas por día "
           "puede atender el usuario y regístralo en DEC-49.")
