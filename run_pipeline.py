@@ -158,7 +158,8 @@ def etapa_ml(acciones: list[str], version: str, principal: str | None, respaldo:
             return False
         argv = ["--algoritmo", ALGORITMO, "--variantes", *VARIANTES, "--anio-desde", ANIO_DESDE,
                 "--excluir", *EXCLUIR, "--param", *PARAMETROS, "--version", version, "--guardar",
-                "--models-dir", str(models_dir)]
+                "--models-dir", str(models_dir),
+                "--salida", str(config.GOLD_DIR / f"informe_desarrollo_{version}.csv")]
         if experimento.main(argv) != 0:
             log.error("El entrenamiento ha fallado")
             return False
