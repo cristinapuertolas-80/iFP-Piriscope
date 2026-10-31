@@ -620,7 +620,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 
 ### DEC-50. Explicaciones SHAP ampliadas: valor de la variable, valor base y resto
 
-- **Fecha:** 2026-10-30 · **Estado:** Aceptada (pendiente de regenerar Gold)
+- **Fecha:** 2026-10-30 · **Estado:** Aceptada
 - **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-inference
 - **Contexto:** DEC-43 dejó pendiente guardar el valor de cada variable y el valor base. Sin ellos el dashboard no puede mostrar «humedad = 38» y la suma de las cinco barras no reconstruye la predicción, porque el top-5 oculta el resto de variables.
 - **Decisión:**
@@ -651,7 +651,7 @@ Se cerrarán durante la adquisición y el EDA y se registrarán como nuevas entr
 - [x] Bootstrap por bloques en lugar de por filas (DEC-40) → DEC-47.
 - [x] Alojamiento de los modelos serializados: los `.joblib` no se suben al repositorio y se publicarán en Hugging Face (DEC-44).
 - [x] Valor de cada variable y valor base de SHAP junto a las contribuciones: ampliado el esquema de `explicaciones.parquet` (DEC-50).
-- [ ] Regenerar `predicciones.parquet` y `explicaciones.parquet` con `inferir --reemplazar` para que todas las filas tengan las columnas de DEC-50.
+- [x] Regenerar `predicciones.parquet` y `explicaciones.parquet` con `inferir --reemplazar` para que todas las filas tengan las columnas de DEC-50 (verificado con `verificar_salidas.py`).
 - [ ] Revisar los umbrales de los niveles de riesgo con el informe final y con la calibración (DEC-41, DEC-47).
 - [ ] Valorar nueva información para el modelo (día del año, tendencia reciente, historial municipal) en una iteración futura (DEC-47, DEC-25).
 - [ ] Calibrar la probabilidad o presentarla como índice de riesgo en el dashboard: el modelo se entrena con una prevalencia del ~2 % y en 2023 fue del 0,75 % (DEC-47).
