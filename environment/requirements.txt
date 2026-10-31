@@ -25,7 +25,10 @@ scikit-learn>=1.4    # Random Forest, métricas (AUC-PR); joblib viene como depe
 joblib>=1.3          # serialización de modelos en models/
 xgboost>=2.0
 shap>=0.45           # explicabilidad (TreeExplainer)
-plotly>=5.18         # gráficos SHAP y mapa del dashboard
+plotly>=5.24         # gráficos SHAP y mapa del dashboard (choroplethmap/scattermap desde 5.24)
+
+# --- Dashboard ---
+streamlit>=1.50
 
 # --- Pruebas ---
 pytest>=8

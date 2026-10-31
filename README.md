@@ -73,7 +73,7 @@ Más detalle en la [documentación y diseño técnico](docs/NF2_Documentacion_y_
 
 ## ▶️ Cómo ejecutar
 
-> 🚧 **El proyecto está en desarrollo.** La **ingesta de datos** ([`src/ingest`](src/ingest/README.md)), la **capa Silver** ([`src/silver`](src/silver/README.md)), la **capa Gold** ([`src/features`](src/features/README.md)) y los módulos de **ML y explicabilidad** ([`src/ml`](src/ml/README.md), [`src/explainability`](src/explainability/README.md)) ya están implementados y se ejecutan desde `run_pipeline.py`; los pasos marcados con ⏳ (el dashboard) aún no lo están.
+> 🚧 **El proyecto está en desarrollo.** La **ingesta de datos** ([`src/ingest`](src/ingest/README.md)), la **capa Silver** ([`src/silver`](src/silver/README.md)), la **capa Gold** ([`src/features`](src/features/README.md)) y los módulos de **ML y explicabilidad** ([`src/ml`](src/ml/README.md), [`src/explainability`](src/explainability/README.md)) ya están implementados y se ejecutan desde `run_pipeline.py`. El **dashboard** ([`src/dashboard`](src/dashboard/README.md)) se lanza con Streamlit.
 
 ### 1. Requisitos previos
 
@@ -159,9 +159,9 @@ python run_pipeline.py --etapas gold ml --ml-acciones entrenar inferir --version
 
 También se pueden ejecutar los módulos por separado: `python -m src.ml.inferir`, `python -m src.ml.experimento` y `python -m src.ml.walkforward` (opciones y ejemplos en [src/ml/README.md](src/ml/README.md)).
 
-### 7. Lanzar el dashboard ⏳
+### 7. Lanzar el dashboard
 
-El dashboard solo lee `predicciones.parquet` y `explicaciones.parquet` de Gold. El contrato de datos con ML está en [docs/contrato_dashboard_gold.md](docs/contrato_dashboard_gold.md).
+El dashboard solo lee `predicciones.parquet` y `explicaciones.parquet` de Gold, que descarga del dataset de Hugging Face al arrancar (necesita `HF_TOKEN` de lectura en `.env`; sin conexión usa `data/gold/`). El contrato de datos con ML está en [docs/contrato_dashboard_gold.md](docs/contrato_dashboard_gold.md) y el detalle del dashboard en [src/dashboard/README.md](src/dashboard/README.md).
 
 ```bash
 streamlit run src/dashboard/app.py
