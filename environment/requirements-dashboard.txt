@@ -1,0 +1,8 @@
+# Dependencias mínimas del dashboard (las instala run_dashboard.py).
+# El entorno completo del proyecto (ingesta, Silver, ML…) está en requirements.txt.
+pandas>=2.1
+pyarrow>=14
+plotly>=5.24         # choroplethmap/scattermap (mapas MapLibre)
+streamlit>=1.50
+huggingface_hub>=0.24
+python-dotenv>=1.0

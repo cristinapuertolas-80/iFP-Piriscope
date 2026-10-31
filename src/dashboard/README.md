@@ -3,10 +3,19 @@
 Presenta las predicciones D+1 de Piriscope: mapa de Galicia, ficha y buscador de municipios, explicación SHAP, evolución del índice, tabla accesible y comparación del modelo frente al FWI. Sigue el [contrato de datos con ML](../../docs/contrato_dashboard_gold.md).
 
 ```bash
-streamlit run src/dashboard/app.py
+python run_dashboard.py
 ```
 
-Se abre en http://localhost:8501. Una vista concreta se puede compartir con la URL: `?fecha=2025-08-14&municipio=32054`.
+Es lo único que hay que ejecutar, desde la raíz del repositorio. La primera vez prepara el entorno, instala `environment/requirements-dashboard.txt`, pide el token de Hugging Face y comprueba el acceso; después abre el dashboard en el navegador (normalmente http://localhost:8501). Para cerrarlo, Ctrl+C en la terminal.
+
+| Opción | Para qué |
+|---|---|
+| `--cambiar-token` | Volver a pedir el token (si caduca o te equivocaste al pegarlo) |
+| `--local` | Usar `data/gold/` en lugar de Hugging Face, sin token (por ejemplo, tras ejecutar el pipeline) |
+| `--solo-preparar` | Instalar y comprobar, sin abrir el dashboard |
+| `--puerto`, `--sin-navegador` | Elegir el puerto o no abrir el navegador |
+
+Con el entorno ya preparado también vale `streamlit run src/dashboard/app.py`. Una vista concreta se puede compartir con la URL: `?fecha=2025-08-14&municipio=32054`.
 
 ## De dónde salen los datos
 
@@ -16,7 +25,7 @@ Se abre en http://localhost:8501. Una vista concreta se puede compartir con la U
 | Límites, nombres y provincias de los 313 municipios | `assets/municipios_galicia.geojson`, versionado en el repositorio |
 | Evaluación frente al FWI e importancia global | `docs/resultados/informe_final.csv`, `informe_walkforward.csv`, `shap_global*.csv` |
 
-El dataset es de acceso restringido: hace falta un **token de lectura** de Hugging Face en el `.env` de la raíz (`HF_TOKEN=...`) y haber aceptado las condiciones del dataset con esa cuenta.
+El dataset es de acceso restringido: hace falta un **token de lectura** de Hugging Face en el `.env` de la raíz (`HF_TOKEN=...`) y haber aceptado las condiciones del dataset con esa cuenta. `run_dashboard.py` pide el token y comprueba las dos cosas.
 
 - Sin conexión, el dashboard usa los ficheros de `data/gold/` si existen y lo avisa.
 - `PIRISCOPE_DASHBOARD_ORIGEN=local` fuerza a usar siempre `data/gold/` (por ejemplo, tras ejecutar el pipeline en local).
