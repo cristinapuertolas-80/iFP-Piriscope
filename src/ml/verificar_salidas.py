@@ -16,6 +16,7 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 FWI = {"fwi", "ffmc", "dmc", "dc", "isi", "bui"}
@@ -68,6 +69,18 @@ def main() -> int:
     comprobar((por_pred == a.top_k).all(), f"{a.top_k} variables por predicción", str(por_pred.value_counts().to_dict()))
     comprobar(not e.duplicated(["id_prediccion", "variable"]).any(), "sin variable repetida dentro de una predicción")
     comprobar(e["valor_shap"].notna().all(), "valor_shap sin nulos")
+    if {"valor_variable", "valor_base", "shap_resto"} <= set(e.columns):
+        comprobar(e["valor_base"].notna().all() and e["shap_resto"].notna().all(),
+                  "valor_base y shap_resto sin nulos (DEC-50)",
+                  f"{int(e['valor_base'].isna().sum()):,} filas sin valor_base" if e["valor_base"].isna().any() else "")
+        g = e.groupby("id_prediccion").agg(base=("valor_base", "first"), top=("valor_shap", "sum"),
+                                           resto=("shap_resto", "first"))
+        reconstruida = 1 / (1 + np.exp(-(g["base"] + g["top"] + g["resto"])))
+        esperada = p.set_index("id_prediccion")["probabilidad"].reindex(g.index)
+        dif = float((reconstruida - esperada).abs().max())
+        comprobar(dif < 5e-4, "valor_base + SHAP reconstruye la probabilidad", f"diferencia máxima {dif:.2e}")
+    else:
+        print("[AVISO] explicaciones sin las columnas de DEC-50: regenera con `inferir --reemplazar`")
 
     # --- Respaldo y FWI
     resp = p["version_modelo"].str.endswith("-respaldo")

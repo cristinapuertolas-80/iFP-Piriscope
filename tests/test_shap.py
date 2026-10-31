@@ -41,7 +41,8 @@ def test_shap_aditivo_random_forest(setup):
 def test_esquema_y_top5(setup):
     df, b, pred = setup
     e = sx.build_explanations(pred, df, b, top_k=5)
-    assert list(e.columns) == sx.EXPL_COLUMNS
+    assert list(e.columns) == sx.EXPL_COLUMNS_EXT
+    assert list(sx.build_explanations(pred, df, b, top_k=5, con_valores=False).columns) == sx.EXPL_COLUMNS
     assert set(e["id_prediccion"]) == set(pred["id_prediccion"])
     assert (e.groupby("id_prediccion").size() == 5).all()
     assert set(e["variable"]) <= set(b.features)
