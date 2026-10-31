@@ -73,7 +73,7 @@ Más detalle en la [documentación y diseño técnico](docs/NF2_Documentacion_y_
 
 ## ▶️ Cómo ejecutar
 
-> 🚧 **El proyecto está en desarrollo.** La **ingesta de datos** ([`src/ingest`](src/ingest/README.md)), la **capa Silver** ([`src/silver`](src/silver/README.md)) y los módulos de **ML y explicabilidad** ([`src/ml`](src/ml/README.md), [`src/explainability`](src/explainability/README.md)) ya están implementados; los pasos marcados con ⏳ aún no lo están.
+> 🚧 **El proyecto está en desarrollo.** La **ingesta de datos** ([`src/ingest`](src/ingest/README.md)), la **capa Silver** ([`src/silver`](src/silver/README.md)), la **capa Gold** ([`src/features`](src/features/README.md)) y los módulos de **ML y explicabilidad** ([`src/ml`](src/ml/README.md), [`src/explainability`](src/explainability/README.md)) ya están implementados y se ejecutan desde `run_pipeline.py`; los pasos marcados con ⏳ (el dashboard) aún no lo están.
 
 ### 1. Requisitos previos
 
@@ -133,16 +133,35 @@ python run_pipeline.py --desde 2001-01-01 --hasta 2024-12-31 --etapas silver
 
 Tablas, cruce e informes de calidad: [src/silver/README.md](src/silver/README.md).
 
-### 6. Ejecutar el resto del pipeline y el modelo ⏳
-
-Los módulos de **ML y explicabilidad** ya están implementados, pero todavía no se ejecutan desde `run_pipeline.py` ni leen la capa Gold real (pendiente de construir). Se usan desde Python: ejemplo y contrato de datos en [src/ml/README.md](src/ml/README.md).
+### 6. Capa Gold, modelo y predicciones
 
 ```bash
-# Ingesta → Silver → Gold → entrenamiento/inferencia para un rango de fechas
-python run_pipeline.py --desde 2020-01-01 --hasta 2024-12-31
+# Gold: variables derivadas y datasets municipio-día (src/features)
+python run_pipeline.py --etapas gold
+
+# Predicciones D+1 del último día disponible con el modelo v1 ya entrenado,
+# más la verificación automática de las salidas
+python run_pipeline.py --etapas ml
+
+# Predecir un rango de días D concreto, empezando las salidas de cero y con figuras SHAP de ejemplo
+python run_pipeline.py --etapas ml --inferir-desde 2024-01-02 --inferir-hasta 2026-10-21 \
+    --reemplazar-predicciones --ejemplo-dir docs/resultados
+
+# Reentrenar (HU-11): Gold, un modelo nuevo versionado y las predicciones con él
+python run_pipeline.py --etapas gold ml --ml-acciones entrenar inferir --version-modelo v2
 ```
 
+- `--desde` y `--hasta` delimitan la ingesta y Silver (solo son obligatorios para esas etapas). **Gold y ML trabajan sobre todo el histórico disponible**, y la inferencia predice el último día disponible salvo que se indique `--inferir-desde` y `--inferir-hasta`.
+- El entrenamiento usa la configuración de DEC-47 (XGBoost, desde 2009, sin `viento`, `scale_pos_weight=1`, variantes `con_fwi` y `sin_fwi`) en la **fase de desarrollo**, que no toca el test. Se niega a sobrescribir una versión de modelo existente salvo con `--sobrescribir-modelo`.
+- Las predicciones de los días sin FWI se hacen con el modelo de respaldo (`version_modelo = v1-respaldo`); detalle en [src/ml/README.md](src/ml/README.md).
+- Si falla Silver, Gold o ML, el pipeline se detiene; `--continuar` lo evita. La ingesta no detiene el pipeline si falla una fuente, pero el código de salida es 1.
+- Los modelos (`models/`) y los datos de `data/` no se suben al repositorio.
+
+También se pueden ejecutar los módulos por separado: `python -m src.ml.inferir`, `python -m src.ml.experimento` y `python -m src.ml.walkforward` (opciones y ejemplos en [src/ml/README.md](src/ml/README.md)).
+
 ### 7. Lanzar el dashboard ⏳
+
+El dashboard solo lee `predicciones.parquet` y `explicaciones.parquet` de Gold. El contrato de datos con ML está en [docs/contrato_dashboard_gold.md](docs/contrato_dashboard_gold.md).
 
 ```bash
 streamlit run src/dashboard/app.py
@@ -155,6 +174,12 @@ pytest
 ```
 
 Los tests también se ejecutan automáticamente con **GitHub Actions** en cada Pull Request.
+
+---
+
+## 📈 Resultados de la evaluación
+
+Con el año de test (2023), el modelo con FWI supera al FWI en AUC-PR en los tres escenarios: municipios vistos (0,028 frente a 0,019), municipios no vistos (0,094 frente a 0,069) y no vistos en 2023 (0,038 frente a 0,021). El modelo sin FWI, que se usa como respaldo cuando falta el FWI, equivale al FWI. La ventaja es **modesta**, no se da en A Coruña, y la probabilidad está sobrestimada, por lo que se presenta como índice de riesgo. Tablas, intervalos y limitaciones: [docs/resultados](docs/resultados/README.md) y [src/ml/README.md](src/ml/README.md).
 
 ---
 
@@ -184,7 +209,9 @@ repo/
 │   ├── arquitectura.png                   # Diagrama de arquitectura
 │   ├── municipios_reservados.csv          # Municipios reservados para evaluación geográfica
 │   ├── tabla_equivalencias.csv            # Equivalencias de códigos INE históricos
-│   └── decisiones.md                      # Registro de decisiones técnicas
+│   ├── decisiones.md                      # Registro de decisiones técnicas
+│   ├── contrato_dashboard_gold.md         # Contrato de datos entre ML y dashboard (capa Gold)
+│   └── resultados/                        # Informes de evaluación (final y walk-forward)
 │
 ├── src/                                   # Código fuente
 │   ├── ingest/                            # Descarga e ingesta de las fuentes (Bronze)
@@ -217,6 +244,7 @@ Los datos de `data/` no se suben al repositorio por su tamaño; se obtienen ejec
 - [NF2 · Documentación y diseño técnico](docs/NF2_Documentacion_y_Diseno_Tecnico.pdf)
 - [Plan de ingesta de datos](docs/plan_ingesta.md)
 - [Decisiones de diseño](docs/decisiones.md)
+- [Contrato de datos entre ML y dashboard](docs/contrato_dashboard_gold.md)
 - [Guía de contribución](CONTRIBUTING.md) (flujo Git, ramas `feat/`, `fix/`, `docs/`, `chore/` y Pull Requests con squash a `main`)
 
 ---

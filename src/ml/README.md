@@ -2,11 +2,11 @@
 
 Estima la **probabilidad de que un municipio registre al menos un parte de incendio el día D+1**, a partir de la información disponible hasta el día D (apartado 5.4 del diseño técnico, HU-06 a HU-08). Lee el dataset de entrenamiento de la capa Gold, compara el modelo con el baseline FWI y escribe las predicciones en Gold. Las explicaciones SHAP están en [`src/explainability`](../explainability/README.md).
 
-> **Estado:** el entrenamiento y la evaluación están implementados y **ejecutados sobre el dataset real de Gold** (resultados en [`docs/resultados`](../../docs/resultados/README.md)). La **inferencia y SHAP con el modelo real** todavía no se han ejecutado, y falta la integración en `run_pipeline.py` (HU-11).
+> **Estado:** el entrenamiento, la evaluación, la inferencia batch y SHAP están implementados y **ejecutados sobre el dataset real de Gold** (resultados en [`docs/resultados`](../../docs/resultados/README.md)), y se lanzan desde `run_pipeline.py --etapas ml` (HU-11). Pendiente: decidir la política de niveles de riesgo (DEC-49) y comparar el FWI intermedio con el consolidado.
 
 ## Resultado
 
-El modelo con FWI (`con_fwi`) **mejora al FWI** en los tres escenarios de test (A, B y C) y en 6 de 7 años de la validación walk-forward, con una ventaja **modesta**: en 2023 su AUC-PR es 0,028, unas 3,7 veces el de un modelo al azar (el FWI, 2,6 veces). El modelo sin FWI (`sin_fwi`) equivale al FWI. Con un único año de test, las conclusiones son consistentes pero no definitivas. Tablas, limitaciones y cómo reproducirlo: [`docs/resultados/README.md`](../../docs/resultados/README.md).
+El modelo con FWI (`con_fwi`) **mejora al FWI** en los tres escenarios de test (A, B y C) y en 6 de 7 años de la validación walk-forward, con una ventaja **modesta**: en 2023 su AUC-PR es 0,028, unas 3,7 veces el de un modelo al azar (el FWI, 2,6 veces). En el walk-forward 2016-2022, a igualdad de alarmas captura entre un 14 % y un 19 % más incendios que el FWI. El modelo sin FWI (`sin_fwi`) equivale al FWI. Con un único año de test, las conclusiones son consistentes pero no definitivas. Tablas, limitaciones y cómo reproducirlo: [`docs/resultados/README.md`](../../docs/resultados/README.md).
 
 ## Módulos
 
@@ -20,8 +20,9 @@ El modelo con FWI (`con_fwi`) **mejora al FWI** en los tres escenarios de test (
 | `predict.py` | Inferencia batch D+1 con el esquema de `Prediccion`; escritura de `predicciones.parquet` |
 | `reservados.py` | Selección reproducible de municipios reservados por bloques de estación, estratificada por provincia y frecuencia de incendios |
 | `experimento.py` | Entrena las variantes, compara con el FWI y escribe el informe (fases de desarrollo y final) |
-| `walkforward.py` | Validación walk-forward: repite la comparación con el FWI en varios años |
-| `inferir.py` | Inferencia batch con el modelo guardado, predicciones y SHAP |
+| `walkforward.py` | Validación walk-forward: repite la comparación con el FWI en varios años. Con `--guardar-predicciones` guarda las probabilidades y los umbrales de cada pliegue |
+| `inferir.py` | Inferencia batch con el modelo guardado: dominio del modelo, modelo de respaldo, predicciones, explicaciones SHAP, avisos de calidad y figuras de ejemplo |
+| `verificar_salidas.py` | Comprueba `predicciones.parquet` y `explicaciones.parquet` (unicidad, cobertura, niveles frente a umbrales, reconstrucción de la probabilidad con SHAP) |
 
 ## Contrato de entrada (tabla de entrenamiento de Gold)
 
@@ -103,6 +104,41 @@ shap_explain.write_explanations(shap_explain.build_explanations(pred, todo, bund
 
 Para entrenar las tres variantes de una vez: `train.train_all_variants(df, "xgboost", anio_desde=2009, excluir=["viento"])`.
 
+### Inferencia en producción
+
+La forma recomendada de predecir es `inferir.py` (o `run_pipeline.py --etapas ml`), no `predict.build_predictions` a mano:
+
+```bash
+# Último día disponible
+python -m src.ml.inferir --modelo v1_xgboost_con_fwi-sin_viento-desde2009 \
+                         --modelo-respaldo v1_xgboost_sin_fwi-sin_viento-desde2009
+
+# Un rango de días D, empezando las salidas de cero y con figuras SHAP de ejemplo
+python -m src.ml.inferir --modelo ... --modelo-respaldo ... --desde 2024-01-02 --hasta 2026-10-21 \
+                         --reemplazar --ejemplo-dir docs/resultados
+
+# Comprobar las salidas
+python src/ml/verificar_salidas.py --pred data/gold/predicciones.parquet --expl data/gold/explicaciones.parquet \
+    --dataset data/gold/dataset_municipio_dia.parquet --models-dir models \
+    --modelo <principal> --respaldo <respaldo>
+```
+
+- **Dominio del modelo (DEC-48):** si una variable que nunca faltó al entrenar (el FWI desde 2009) falta en un día, el modelo devuelve valores arbitrarios. Esas filas **no se predicen con el principal**: se predicen con `--modelo-respaldo` (modelo sin FWI, `version_modelo = <v>-respaldo`) o se omiten. Las filas sin ninguna variable meteorológica con dato tampoco se predicen (`--min-variables`).
+- **Una predicción vigente por municipio y fecha:** al escribir, las nuevas sustituyen a las existentes del mismo municipio y `fecha_objetivo` (aunque tengan otra versión) y a sus explicaciones; así, cuando llega el FWI, `v1` reemplaza a `v1-respaldo`. La escritura es atómica. `--reemplazar` descarta todo lo anterior.
+- **Avisos** por stderr: cobertura baja (`--min-cobertura`), fechas con casi todos los municipios en «medio» o «alto» (`--aviso-alarmas`), muchos nulos meteorológicos en el último día y retraso respecto a hoy (`--max-retraso`).
+- **Figuras de ejemplo** (`--ejemplo-dir`): se generan después de escribir las salidas; si fallan, el código de salida es 2 pero las predicciones ya están escritas.
+
+### Análisis auxiliares
+
+Scripts independientes (solo pandas y numpy) para estudiar las salidas y los niveles de riesgo, en `scripts/`:
+
+| Script | Para qué |
+|---|---|
+| `analisis_walkforward.py` | Políticas de niveles (Recall objetivo o presupuesto de alarmas), alarmas por mes, días saturados y calibración con las predicciones del walk-forward (DEC-49) |
+| `analisis_niveles.py` | Lo mismo sobre la validación de 2022 con el modelo guardado (`python -m src.ml.analisis_niveles`) |
+| `diagnostico_alarmas.py` | Diagnostica las fechas con casi todos los municipios en «medio» o «alto» |
+| `comparar_fwi.py` | Compara el FWI intermedio con el consolidado para un mismo mes |
+
 ## Variantes del modelo
 
 | Variante | Variables | Para qué |
@@ -133,37 +169,47 @@ En el informe final, B se recorta a los **años de entrenamiento del modelo** (c
 
 ## Niveles de riesgo
 
-Los umbrales se fijan en validación (municipios no reservados) por Recall objetivo: **medio** = Recall ≥ 0,8 y **alto** = Recall ≥ 0,5. Son valores **provisionales**: en test, el Recall real del 80 % fijado en 2022 fue de 0,73 (A), 0,81 (B) y 0,76 (C), porque la prevalencia baja de un año a otro. Se guardan junto al modelo y el código rechaza aplicar los umbrales de otro modelo.
+Los umbrales se fijan en validación (municipios no reservados) por Recall objetivo: **medio** = Recall ≥ 0,8 y **alto** = Recall ≥ 0,5. Son valores **provisionales** (DEC-41, DEC-49):
+
+- En test, el Recall real del 80 % fijado en 2022 fue de 0,73 (A), 0,81 (B) y 0,76 (C). En el walk-forward 2016-2022, con el umbral de cada año fijado con el año anterior, el Recall va de 0,70 a 0,90 y las alarmas con «medio» del 21 al 39 % de los municipio-días; la Precision, del 2 % al 6 %.
+- Un presupuesto de alarmas con umbral absoluto tampoco fija el volumen (el del 20 % marcó entre el 13 y el 28 % según el año), por lo que **se propone mantener el Recall objetivo** (DEC-49, pendiente de confirmar).
+- En episodios de sequía casi todos los municipios superan el umbral «medio». No es un fallo de datos: el modelo refleja el riesgo general y los niveles absolutos pierden capacidad de priorizar. El percentil del municipio dentro de su día aporta algo de señal dentro de esos días (lift del top 10 % de 1,5 a 2,1 en los siete años), y se propone como dato complementario.
+- La probabilidad sobrestima la tasa real entre 1,5 y 2,4 veces según el año, así que se presenta como **índice de riesgo**.
+
+Los umbrales se reajustan con el último año completo en cada reentrenamiento. Se guardan junto al modelo y el código rechaza aplicar los umbrales de otro modelo.
 
 ## Salidas
 
 | Fichero | Contenido |
 |---|---|
-| `data/gold/predicciones.parquet` | `id_prediccion`, `id_municipio`, `fecha_objetivo`, `version_modelo`, `probabilidad`, `nivel_riesgo`, `fwi` (copia del día D), `fecha_insert` |
+| `data/gold/predicciones.parquet` | `id_prediccion`, `id_municipio`, `fecha_objetivo`, `version_modelo` (`v1` o `v1-respaldo`), `probabilidad`, `nivel_riesgo`, `fwi` (copia del día D; nulo en el respaldo), `fecha_insert` |
+| `data/gold/explicaciones.parquet` | `id_prediccion`, `variable`, `valor_shap`, `valor_variable`, `valor_base`, `shap_resto`: las 5 variables de mayor \|SHAP\| por predicción (DEC-50). Ver [`src/explainability`](../explainability/README.md) |
 | `data/gold/informe_desarrollo.csv`, `informe_final.csv`, `informe_walkforward.csv` | Informes de evaluación. Los finales se publican en `docs/resultados/` |
 | `models/<versión>_<algoritmo>_<variante>.joblib` | Modelo serializado. Junto a él, un `.json` con versión, semilla, variables, parámetros, año inicial y variables excluidas, y un `_umbrales.json` |
 
-Las escrituras de predicciones sobrescriben las filas con el mismo `id_prediccion` y conservan el resto, así que reprocesar un periodo no duplica datos. En producción se predicen todos los municipios, reservados incluidos.
+Al escribir, las predicciones nuevas sustituyen a las existentes del mismo municipio y `fecha_objetivo` (y a sus explicaciones) y se conserva el resto, así que reprocesar un periodo no duplica datos. En producción se predicen todos los municipios, reservados incluidos. El contrato con el dashboard está en [`docs/contrato_dashboard_gold.md`](../../docs/contrato_dashboard_gold.md).
 
 ## Decisiones
 
-Registradas en [docs/decisiones.md](../../docs/decisiones.md), DEC-37 a DEC-47 (contrato de entrada, variantes, entrenamiento, comparación con el baseline, niveles de riesgo, inferencia, SHAP, persistencia de modelos, municipios reservados, dataset de Gold y configuración del modelo).
+Registradas en [docs/decisiones.md](../../docs/decisiones.md), DEC-37 a DEC-50 (contrato de entrada, variantes, entrenamiento, comparación con el baseline, niveles de riesgo, inferencia, SHAP, persistencia de modelos, municipios reservados, dataset de Gold, configuración del modelo, inferencia real con modelo de respaldo, niveles de riesgo y SHAP ampliado).
 
 ## Limitaciones y pendientes
 
-- **Un único año de test (2023):** las conclusiones sobre la mejora frente al FWI son consistentes pero no definitivas. En A, el límite inferior del intervalo está casi en cero.
-- **Rendimiento absoluto modesto** y **A Coruña no mejora al FWI**.
-- **Probabilidades sin calibrar para 2023:** el modelo se entrena con una prevalencia del ~2 % y la de 2023 fue del 0,75 %, así que tiende a sobrestimarlas. Antes de mostrarlas como probabilidad hay que calibrarlas o presentarlas como índice de riesgo.
+- **Un único año de test (2023):** las conclusiones sobre la mejora frente al FWI son consistentes pero no definitivas (en A, el límite inferior del intervalo está casi en cero). El walk-forward 2016-2022 las respalda: gana en 6 de 7 años.
+- **Rendimiento absoluto modesto:** Precision del 2 % al 6 % con Recall ≈ 0,8, según el año. «Medio» o «alto» significa «no descartar», no «habrá un incendio». **A Coruña no mejora al FWI.**
+- **El modelo de respaldo no mejora al FWI** (`sin_fwi` equivale al FWI): las predicciones de los últimos días, sin FWI, no aportan más que el propio índice, y sus niveles discriminan poco.
+- **Desfase de los datos:** el FWI y la meteorología llegan con retraso de varios días, así que la última fecha objetivo va por detrás de hoy. No es una previsión a varios días.
+- **FWI intermedio:** los meses aún no consolidados usan el dataset intermedio, y el modelo se entrenó con el consolidado. No se ha comparado el efecto sobre las predicciones recientes (`scripts/comparar_fwi.py`).
+- **Probabilidad sin calibrar:** sobrestima entre 1,5 y 2,4 veces según el año y una calibración fijada en un año no se mantiene; se presenta como índice de riesgo.
+- **Niveles de riesgo:** política pendiente de confirmar (DEC-49). Los umbrales son provisionales y el Recall objetivo no se reproduce con exactitud de un año a otro.
 - **Etiquetas de 2022 y 2023:** pendiente contrastar con las estadísticas oficiales de EGIF que sean definitivas (DEC-31).
-- Los umbrales de riesgo (0,8 y 0,5) son provisionales y el Recall objetivo no se reproduce con exactitud de un año a otro.
-- Los `.joblib` son pickles: solo cargar ficheros generados por el propio proyecto, y no se suben al repositorio. Pendiente decidir dónde alojar los modelos finales (DEC-44).
-- Pendiente: integración en `run_pipeline.py` (HU-11, que pasará `anio_desde=2009` y `excluir=["viento"]`).
+- Los `.joblib` son pickles: solo cargar ficheros generados por el propio proyecto, y no se suben al repositorio. Pendiente subir los modelos finales a Hugging Face (DEC-44).
 
 ## Tests
 
 ```bash
 pytest tests/test_config.py tests/test_splits.py tests/test_evaluate.py tests/test_train.py tests/test_risk.py \
-       tests/test_predict.py tests/test_reservados.py tests/test_experimento.py tests/test_walkforward.py
+       tests/test_predict.py tests/test_reservados.py tests/test_experimento.py tests/test_walkforward.py tests/test_inferir.py
 ```
 
-Usan datos aleatorios con el esquema de Gold (`tests/toy_data.py`, fixture `toy_gold` en `tests/conftest.py`) y no necesitan red ni datos reales. Comprueban, entre otras cosas, que ninguna variante usa variables prohibidas, que el entrenamiento no toca filas reservadas ni de test, que modelo y baseline se evalúan sobre las mismas filas, que el bootstrap por bloques da intervalos más anchos con datos agrupados, que el walk-forward solo usa el pasado y no llega al año de test, y que el escenario B se recorta al periodo de entrenamiento.
+Usan datos aleatorios con el esquema de Gold (`tests/toy_data.py`, fixture `toy_gold` en `tests/conftest.py`) y no necesitan red ni datos reales. Comprueban, entre otras cosas, que ninguna variante usa variables prohibidas, que el entrenamiento no toca filas reservadas ni de test, que modelo y baseline se evalúan sobre las mismas filas, que el bootstrap por bloques da intervalos más anchos con datos agrupados, que el walk-forward solo usa el pasado y no llega al año de test, y que el escenario B se recorta al periodo de entrenamiento. `test_inferir.py` cubre la inferencia: último día por defecto, rangos, dominio del modelo y respaldo, filas sin información y figuras de ejemplo.
