@@ -60,6 +60,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 | [DEC-48](#dec-48-inferencia-real-dominio-del-modelo-modelo-de-respaldo-y-filas-sin-predicción) | Inferencia real: dominio del modelo, modelo de respaldo y filas sin predicción | Modelo / Arquitectura | Aceptada |
 | [DEC-49](#dec-49-niveles-de-riesgo-saturación-en-episodios-de-sequía-y-presentación) | Niveles de riesgo: saturación en sequía y presentación | Modelo / UX | Propuesta |
 | [DEC-50](#dec-50-explicaciones-shap-ampliadas-valor-de-la-variable-valor-base-y-resto) | Explicaciones SHAP ampliadas | Explicabilidad | Aceptada |
+| [DEC-51](#dec-51-integración-de-ml-en-el-orquestador-hu-11) | Integración de ML en el orquestador | Arquitectura | Aceptada |
 
 ---
 
@@ -632,6 +633,25 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 - **Alternativas descartadas:** guardar el valor base en una tabla aparte por modelo (más piezas que cruzar); añadir una fila «otras variables» por predicción (rompería las cinco filas por predicción del contrato); agrupar las variables FWI dentro de `explicaciones.parquet` (se pierde el valor de cada variable; el agrupado se hace solo en la importancia global).
 - **Consecuencias:** unos 40 MB más sin comprimir con el histórico actual (1,6 millones de filas × 3 columnas decimales). Las filas escritas antes de esta ampliación conservan las columnas nuevas como nulas; para tenerlas completas hay que regenerar con `inferir --reemplazar`. El dashboard debe tolerar columnas ausentes o nulas (contrato, apartado 5).
 
+### DEC-51. Integración de ML en el orquestador (HU-11)
+
+- **Fecha:** 2026-10-31 · **Estado:** Aceptada (pendiente de probar con datos reales)
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-inference
+- **Contexto:** `run_pipeline.py` (DEC-12) solo implementaba la ingesta y Silver; Gold y ML eran un aviso de «etapa no implementada». HU-11 pide un único comando que repita la preparación y el entrenamiento y genere un modelo versionado sin editar código, y la ejecución diaria necesita predecir sin reentrenar.
+- **Decisión:**
+  - **Etapa `gold`:** ejecuta `python -m src.features` sin argumentos (todo el histórico de Silver y la partición por defecto de DEC-21 y DEC-46) y falla si no aparecen `dataset_entrenamiento.parquet` y `dataset_municipio_dia.parquet`. `--desde` y `--hasta` solo se exigen para ingesta y Silver.
+  - **Etapa `ml`**, con dos acciones (`--ml-acciones`): `inferir` (por defecto) y `entrenar`.
+  - **`entrenar`:** `experimento.py --guardar` en fase de desarrollo (nunca `--final`: el informe final se ejecuta una sola vez, DEC-47) con la configuración de DEC-47 (XGBoost, variantes `con_fwi` y `sin_fwi`, desde 2009, sin `viento`, `scale_pos_weight=1`), fijada como constantes en `run_pipeline.py`. Se niega a escribir sobre una versión de modelo existente salvo con `--sobrescribir-modelo`, y su informe va a `informe_desarrollo_<versión>.csv` para no pisar el actual.
+  - **`inferir`:** `inferir.py` con el modelo `con_fwi` de la versión como principal y el `sin_fwi` como respaldo (DEC-48), o los indicados con `--modelo` y `--modelo-respaldo`. Sin rango predice el último día disponible; con `--inferir-desde` y `--inferir-hasta`, un rango. `--reemplazar-predicciones` empieza de cero. Después ejecuta `verificar_salidas.py` (se omite con `--sin-verificar`) y, si encuentra problemas, la etapa falla.
+  - **Orden y parada:** las etapas se ejecutan siempre en el orden del pipeline. Si fallan Silver, Gold o ML, se detiene (salvo con `--continuar`). Una fuente de ingesta caída no detiene el pipeline, pero el código de salida es 1.
+  - Un reentrenamiento con los mismos datos, configuración y semilla debe reproducir los umbrales del modelo guardado (comprobación pendiente).
+- **Alternativas descartadas:** entrenar cada vez que se ejecuta la etapa `ml` (caro e innecesario en la ejecución diaria); reentrenar con `--final` (contaminaría el test); pasar la configuración del modelo por la línea de comandos (se pierde la garantía de que producción usa la de DEC-47: cambiarla exige editar las constantes y registrarlo); sobrescribir modelos en silencio.
+- **Consecuencias:**
+  - Los umbrales de riesgo se fijan sobre la validación de la partición de Gold: al reentrenar con años nuevos hay que revisar DEC-21 y reajustarlos con el último año completo (DEC-49).
+  - El orquestador no pasa las opciones `--anio-*` a Gold. Para cambiar los años de partición hay que ejecutar `python -m src.features` directamente (DEC-46) y registrarlo.
+  - Gold y ML no usan `--desde` ni `--hasta`: solo se puede reprocesar un periodo concreto en ingesta y Silver.
+  - `tests/test_run_pipeline_ml.py` (16 tests) cubre el orden, la parada, las versiones, la resolución de modelos y la verificación con piezas simuladas; no ejecuta `src.features`, `experimento` ni `inferir` de verdad.
+
 ---
 
 ## Decisiones pendientes
@@ -665,7 +685,10 @@ Se cerrarán durante la adquisición y el EDA y se registrarán como nuevas entr
 - [ ] Comparar el FWI intermedio con el consolidado en los meses que tengan ambos: el modelo se entrena con el consolidado y las predicciones recientes usan el intermedio (DEC-34, DEC-48).
 - [ ] Si algún día se quiere mostrar una probabilidad calibrada y no un índice, hará falta un método estable entre años: ajustar con la tasa base del año anterior deja la razón entre 0,77 y 1,50 según el año (DEC-49).
 - [ ] Acordar con Frontend el contrato de lectura de Gold: una predicción vigente por municipio y fecha, `v1-respaldo` como «estimación sin FWI», ausencias como «sin dato» y la probabilidad siempre junto al nivel (DEC-48, DEC-49).
-- [ ] Conectar `inferir.py` a `run_pipeline.py` con el rango de fechas (HU-11).
+- [x] Conectar `inferir.py` y el entrenamiento a `run_pipeline.py` (HU-11, DEC-51).
+- [ ] Probar el orquestador con datos reales: Gold, inferencia desde cero, idempotencia y reentrenamiento reproducible (los umbrales de una versión de prueba deben ser iguales a los de `v1`) (DEC-51).
+- [ ] Decidir qué hacer con las etiquetas de 2024 cuando EGIF las publique (mover los años de partición o mantener 2021/2022/2023) y, si procede, pasar las opciones `--anio-*` desde `run_pipeline.py` (DEC-21, DEC-51).
+- [ ] Añadir a `gold_informe.json` la última fecha con dato por variable y los nulos de los últimos 30 días (incluidas las filas sin etiqueta), para documentar el desfase del FWI y de la meteorología (DEC-46, DEC-48).
 - [x] Guardar las predicciones del walk-forward 2016-2022 (`walkforward.py --guardar-predicciones`) y analizarlas con `analisis_walkforward.py` (DEC-47, DEC-49).
 - [ ] Documentar en la memoria y en el dashboard que el modelo no supera al FWI en A Coruña (DEC-47).
 

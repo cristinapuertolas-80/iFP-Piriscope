@@ -191,7 +191,7 @@ Al escribir, las predicciones nuevas sustituyen a las existentes del mismo munic
 
 ## Decisiones
 
-Registradas en [docs/decisiones.md](../../docs/decisiones.md), DEC-37 a DEC-50 (contrato de entrada, variantes, entrenamiento, comparación con el baseline, niveles de riesgo, inferencia, SHAP, persistencia de modelos, municipios reservados, dataset de Gold, configuración del modelo, inferencia real con modelo de respaldo, niveles de riesgo y SHAP ampliado).
+Registradas en [docs/decisiones.md](../../docs/decisiones.md), DEC-37 a DEC-51 (contrato de entrada, variantes, entrenamiento, comparación con el baseline, niveles de riesgo, inferencia, SHAP, persistencia de modelos, municipios reservados, dataset de Gold, configuración del modelo, inferencia real con modelo de respaldo, niveles de riesgo, SHAP ampliado e integración en el orquestador).
 
 ## Limitaciones y pendientes
 
