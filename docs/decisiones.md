@@ -61,6 +61,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 | [DEC-49](#dec-49-niveles-de-riesgo-saturación-en-episodios-de-sequía-y-presentación) | Niveles de riesgo: saturación en sequía y presentación | Modelo / UX | Propuesta |
 | [DEC-50](#dec-50-explicaciones-shap-ampliadas-valor-de-la-variable-valor-base-y-resto) | Explicaciones SHAP ampliadas | Explicabilidad | Aceptada |
 | [DEC-51](#dec-51-integración-de-ml-en-el-orquestador-hu-11) | Integración de ML en el orquestador | Arquitectura | Aceptada |
+| [DEC-52](#dec-52-dashboard-origen-de-los-datos-catálogo-de-municipios-y-presentación) | Dashboard: origen de los datos, catálogo de municipios y presentación | Arquitectura / UX | Aceptada |
 
 ---
 
@@ -652,6 +653,28 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
   - Gold y ML no usan `--desde` ni `--hasta`: solo se puede reprocesar un periodo concreto en ingesta y Silver.
   - `tests/test_run_pipeline_ml.py` (16 tests) cubre el orden, la parada, las versiones, la resolución de modelos y la verificación con piezas simuladas; no ejecuta `src.features`, `experimento` ni `inferir` de verdad.
 
+### DEC-52. Dashboard: origen de los datos, catálogo de municipios y presentación
+
+- **Fecha:** 2026-10-31 · **Estado:** Aceptada
+- **Responsable:** Alejandro (Frontend) · **Issue/PR:** feat/dashboard
+- **Contexto:** el contrato del dashboard (`contrato_dashboard_gold.md`, apartado 8) dejaba pendientes de acordar con Frontend de dónde salen los nombres y la geometría de los municipios, dónde se leen los ficheros de evaluación y la importancia global, si se muestra la prioridad relativa y cómo se avisa de un episodio de riesgo generalizado. Además, `data/gold` no se versiona (DEC-10), así que había que decidir de dónde lee Gold el dashboard.
+- **Decisión:**
+  - **Origen de Gold:** el dashboard descarga `predicciones.parquet` y `explicaciones.parquet` del dataset de Hugging Face (DEC-11) con `hf_hub_download`, que guarda una caché local y solo vuelve a bajar lo que ha cambiado. El dataset es de acceso restringido: hace falta un `HF_TOKEN` de lectura en `.env`. Sin conexión usa `data/gold` y lo avisa; `PIRISCOPE_DASHBOARD_ORIGEN=local` fuerza siempre `data/gold` (por ejemplo, tras ejecutar el pipeline en local). La lectura se cachea una hora y un botón permite buscar datos nuevos. `explicaciones.parquet` se filtra por `id_prediccion` (unos 0,05 s), sin cargarlo entero.
+  - **Nombres y geometría (apartado 8.1):** `src/dashboard/assets/municipios_galicia.geojson`, versionado en el repositorio y generado una sola vez con `scripts/generar_mapa_municipios.py` a partir de los recintos del CNIG, con el mismo filtro que Silver (`filtrar_recintos`, DEC-32). Se simplifica a 150 m y 5 decimales (543 KB) y cada municipio lleva `id_municipio`, `nombre`, `provincia` y un punto interior. Los 313 códigos y nombres coinciden con `municipio.parquet`. El GeoJSON es también el catálogo del buscador y del mapa, de modo que el dashboard no lee Silver.
+  - **Evaluación e importancia global (apartados 8.2 y 8.3):** se leen de `docs/resultados/` (`informe_final.csv`, `informe_walkforward.csv`, `shap_global.csv` y `shap_global_grupos.csv`), la ubicación propuesta en el contrato.
+  - **Prioridad relativa (apartado 8.4):** se muestra como «top N %» junto al nivel, calculada por fecha y por `version_modelo` (opción 1 de DEC-49), solo como información complementaria.
+  - **Episodio generalizado (apartado 8.5):** aviso informativo cuando al menos el 90 % de los municipios con predicción de la fecha están en «medio» o «alto».
+  - **Accesibilidad y casos límite (DEC-28, DEC-48):** paleta Okabe-Ito con el nivel siempre en texto; «sin dato» en gris con un punto oscuro encima; las filas `-respaldo` con la etiqueta «Estimación sin FWI», FWI «no disponible», borde grueso en el mapa y círculo hueco en la evolución; tabla equivalente al mapa. La fecha por defecto es la última con predicción.
+  - **Provincias donde el modelo no mejora (DEC-47):** el panel de evaluación avisa de las provincias en las que el AUC-PR del modelo no supera al del FWI en al menos un 10 %. Con `con_fwi`, A Coruña aparece en los cuatro escenarios.
+  - **Selección en el mapa:** Streamlit no recibe el clic sobre las coropletas de Plotly, así que cada municipio lleva un punto clicable. La URL refleja la fecha y el municipio (`?fecha=2025-08-14&municipio=32054`) para poder compartir una vista.
+- **Alternativas descartadas:** leer el GeoPackage del CNIG desde el dashboard (230 MB y supone leer Bronze, que el contrato prohíbe); sacar los nombres de `municipio.parquet` (es Silver); versionar los ficheros de Gold en el repositorio (DEC-10); avisar solo de las provincias donde el modelo queda por debajo del FWI (ocultaría A Coruña en el escenario A, donde el modelo obtiene 0,0161 frente a 0,0150, con intervalos muy amplios); recalcular niveles a partir de la probabilidad (el contrato lo prohíbe).
+- **Consecuencias:**
+  - Para ejecutar el dashboard hace falta un token de lectura de Hugging Face de una cuenta que haya aceptado las condiciones del dataset.
+  - Si cambian los límites municipales, hay que regenerar el GeoJSON con el script.
+  - El fondo del mapa (teselas de CARTO/OpenStreetMap) necesita conexión a internet; los municipios se pintan igualmente.
+  - Si el equipo descarta DEC-49, la prioridad relativa se retira del dashboard sin cambiar Gold.
+  - Nueva dependencia: `streamlit`, y `plotly>=5.24` por los mapas MapLibre. `tests/test_dashboard.py` (9 tests) cubre la preparación de los datos, los casos límite, el origen de los datos y un smoke test de la app con datos de juguete.
+
 ---
 
 ## Decisiones pendientes
@@ -675,7 +698,7 @@ Se cerrarán durante la adquisición y el EDA y se registrarán como nuevas entr
 - [ ] Revisar los umbrales de los niveles de riesgo con el informe final y con la calibración (DEC-41, DEC-47).
 - [ ] Valorar nueva información para el modelo (día del año, tendencia reciente, historial municipal) en una iteración futura (DEC-47, DEC-25).
 - [ ] Calibrar la probabilidad o presentarla como índice de riesgo en el dashboard: el modelo se entrena con una prevalencia del ~2 % y en 2023 fue del 0,75 % (DEC-47).
-- [ ] Dashboard: mostrar `v1-respaldo` como «estimación sin FWI» y las ausencias como «sin dato» (DEC-48).
+- [x] Dashboard: mostrar `v1-respaldo` como «estimación sin FWI» y las ausencias como «sin dato» (DEC-48) → DEC-52.
 - [ ] Reducir los días de respaldo: valorar una fuente de FWI más reciente (el retraso actual es de 2 a 3 días) (DEC-48).
 - [ ] Valorar umbrales o niveles alternativos: con el Recall del 80 %, en agosto el 82 % de los municipio-días entra en «medio o superior» (DEC-41). Por mes queda descartado por falta de positivos; cierre en DEC-49.
 - [ ] Subir los modelos finales a Hugging Face y enlazarlos (DEC-44).
@@ -684,13 +707,13 @@ Se cerrarán durante la adquisición y el EDA y se registrarán como nuevas entr
 - [ ] Reajustar los umbrales con el último año completo en cada reentrenamiento y valorar fijarlos con varios años: los fijados con un solo año van de 0,018 a 0,038 (DEC-41, DEC-49, HU-11).
 - [ ] Comparar el FWI intermedio con el consolidado en los meses que tengan ambos: el modelo se entrena con el consolidado y las predicciones recientes usan el intermedio (DEC-34, DEC-48).
 - [ ] Si algún día se quiere mostrar una probabilidad calibrada y no un índice, hará falta un método estable entre años: ajustar con la tasa base del año anterior deja la razón entre 0,77 y 1,50 según el año (DEC-49).
-- [ ] Acordar con Frontend el contrato de lectura de Gold: una predicción vigente por municipio y fecha, `v1-respaldo` como «estimación sin FWI», ausencias como «sin dato» y la probabilidad siempre junto al nivel (DEC-48, DEC-49).
+- [x] Acordar con Frontend el contrato de lectura de Gold: una predicción vigente por municipio y fecha, `v1-respaldo` como «estimación sin FWI», ausencias como «sin dato» y la probabilidad siempre junto al nivel (DEC-48, DEC-49) → implementado en el dashboard (DEC-52).
 - [x] Conectar `inferir.py` y el entrenamiento a `run_pipeline.py` (HU-11, DEC-51).
 - [ ] Probar el orquestador con datos reales: Gold, inferencia desde cero, idempotencia y reentrenamiento reproducible (los umbrales de una versión de prueba deben ser iguales a los de `v1`) (DEC-51).
 - [ ] Decidir qué hacer con las etiquetas de 2024 cuando EGIF las publique (mover los años de partición o mantener 2021/2022/2023) y, si procede, pasar las opciones `--anio-*` desde `run_pipeline.py` (DEC-21, DEC-51).
 - [ ] Añadir a `gold_informe.json` la última fecha con dato por variable y los nulos de los últimos 30 días (incluidas las filas sin etiqueta), para documentar el desfase del FWI y de la meteorología (DEC-46, DEC-48).
 - [x] Guardar las predicciones del walk-forward 2016-2022 (`walkforward.py --guardar-predicciones`) y analizarlas con `analisis_walkforward.py` (DEC-47, DEC-49).
-- [ ] Documentar en la memoria y en el dashboard que el modelo no supera al FWI en A Coruña (DEC-47).
+- [ ] Documentar en la memoria y en el dashboard que el modelo no supera al FWI en A Coruña (DEC-47). Hecho en el dashboard (DEC-52); falta la memoria.
 
 ---
 
