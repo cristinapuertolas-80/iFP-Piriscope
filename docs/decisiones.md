@@ -59,6 +59,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 | [DEC-47](#dec-47-configuración-del-modelo-y-protocolo-de-evaluación) | Configuración del modelo y protocolo de evaluación | Modelo / Evaluación | Aceptada |
 | [DEC-48](#dec-48-inferencia-real-dominio-del-modelo-modelo-de-respaldo-y-filas-sin-predicción) | Inferencia real: dominio del modelo, modelo de respaldo y filas sin predicción | Modelo / Arquitectura | Aceptada |
 | [DEC-49](#dec-49-niveles-de-riesgo-saturación-en-episodios-de-sequía-y-presentación) | Niveles de riesgo: saturación en sequía y presentación | Modelo / UX | Propuesta |
+| [DEC-50](#dec-50-explicaciones-shap-ampliadas-valor-de-la-variable-valor-base-y-resto) | Explicaciones SHAP ampliadas | Explicabilidad | Aceptada |
 
 ---
 
@@ -617,6 +618,20 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 - **Alternativas descartadas:** umbrales por presupuesto de alarmas (el volumen real varía casi tanto como con el Recall objetivo y se pierde Recall); sustituir los niveles por el top-x % de cada día o por el híbrido (pierden Recall, ver arriba); umbrales por mes calculados solo con 2022 (unos 1.200 positivos en todo el año, demasiado pocos por mes); usar el test de 2023 para ajustar umbrales o calibrar (DEC-47 lo reserva para el informe final).
 - **Consecuencias:** el dashboard muestra siempre la probabilidad junto al nivel. El percentil (opción 1) se refleja en el contrato del dashboard (`contrato_dashboard_gold.md`, apartado 4.4). La probabilidad sobrestima la tasa real entre 1,5 y 2,4 veces según el año (en noviembre y diciembre de 2024-2026 la media prevista es del 0,6-0,7 % frente a prevalencias históricas del 0,2-0,3 %). Como la prevalencia cambia de un año a otro (3 %, 1,4 %, 0,75 %), una calibración fijada en un año no se mantendría, y calibrar con una transformación monótona no cambia qué filas quedan en cada nivel si los umbrales se reajustan. Se propone presentarla como índice de riesgo y no como probabilidad exacta.
 
+### DEC-50. Explicaciones SHAP ampliadas: valor de la variable, valor base y resto
+
+- **Fecha:** 2026-10-30 · **Estado:** Aceptada (pendiente de regenerar Gold)
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/ml-inference
+- **Contexto:** DEC-43 dejó pendiente guardar el valor de cada variable y el valor base. Sin ellos el dashboard no puede mostrar «humedad = 38» y la suma de las cinco barras no reconstruye la predicción, porque el top-5 oculta el resto de variables.
+- **Decisión:**
+  - `explicaciones.parquet` añade tres columnas, repetidas en las cinco filas de cada predicción: `valor_variable` (valor de la variable el día D; nulo si faltaba), `valor_base` (valor esperado del modelo, en las unidades de `valor_shap`) y `shap_resto` (suma de las contribuciones de las variables fuera del top-k). Con ellas, en XGBoost, logit(probabilidad) = `valor_base` + suma de `valor_shap` + `shap_resto`.
+  - El esquema base de tres columnas se conserva (`EXPL_COLUMNS`) y `build_explanations(con_valores=False)` lo reproduce. Sigue habiendo cinco filas por predicción.
+  - `global_importance(por_grupo=True)` calcula la importancia por grupos (índices FWI, meteorología del día, lluvia acumulada y sequía, calendario), sumando las contribuciones antes del valor absoluto, porque los índices FWI son correlacionados y SHAP reparte su efecto entre ellos.
+  - `build_explanations(verificar=True)` comprueba que `valor_base` más la suma de SHAP reproduce la salida del modelo y avisa (no falla) si no se cumple. `inferir.py` lo activa.
+  - Gráficos: etiquetas legibles (`ETIQUETAS`), título con municipio, fecha e índice de riesgo, valor de cada variable, barra gris con el resto y gráfico en cascada del valor base a la predicción. Todo es opcional y los gráficos sin opciones se comportan como antes. Las figuras de ejemplo de `inferir.py` incluyen la cascada y la importancia por grupos.
+- **Alternativas descartadas:** guardar el valor base en una tabla aparte por modelo (más piezas que cruzar); añadir una fila «otras variables» por predicción (rompería las cinco filas por predicción del contrato); agrupar las variables FWI dentro de `explicaciones.parquet` (se pierde el valor de cada variable; el agrupado se hace solo en la importancia global).
+- **Consecuencias:** unos 40 MB más sin comprimir con el histórico actual (1,6 millones de filas × 3 columnas decimales). Las filas escritas antes de esta ampliación conservan las columnas nuevas como nulas; para tenerlas completas hay que regenerar con `inferir --reemplazar`. El dashboard debe tolerar columnas ausentes o nulas (contrato, apartado 5).
+
 ---
 
 ## Decisiones pendientes
@@ -635,7 +650,8 @@ Se cerrarán durante la adquisición y el EDA y se registrarán como nuevas entr
 - [ ] Recall objetivo de los niveles de riesgo (0,8 y 0,5) y cierre de DEC-04 (DEC-41).
 - [x] Bootstrap por bloques en lugar de por filas (DEC-40) → DEC-47.
 - [x] Alojamiento de los modelos serializados: los `.joblib` no se suben al repositorio y se publicarán en Hugging Face (DEC-44).
-- [ ] Valor de cada variable y valor base de SHAP junto a las contribuciones (sin el valor base no se reconstruye la probabilidad): ampliar el esquema de `explicaciones.parquet` o cruzar con Gold (DEC-43).
+- [x] Valor de cada variable y valor base de SHAP junto a las contribuciones: ampliado el esquema de `explicaciones.parquet` (DEC-50).
+- [ ] Regenerar `predicciones.parquet` y `explicaciones.parquet` con `inferir --reemplazar` para que todas las filas tengan las columnas de DEC-50.
 - [ ] Revisar los umbrales de los niveles de riesgo con el informe final y con la calibración (DEC-41, DEC-47).
 - [ ] Valorar nueva información para el modelo (día del año, tendencia reciente, historial municipal) en una iteración futura (DEC-47, DEC-25).
 - [ ] Calibrar la probabilidad o presentarla como índice de riesgo en el dashboard: el modelo se entrena con una prevalencia del ~2 % y en 2023 fue del 0,75 % (DEC-47).

@@ -1,7 +1,7 @@
 # Contrato de datos entre ML y Dashboard (capa Gold)
 
-**Versión:** 1.2 · **Fecha:** 2026-10-30 · **Responsable ML:** Hikari · **Consumidor:** Frontend (Streamlit)
-**Decisiones relacionadas:** DEC-12, DEC-14, DEC-41, DEC-42, DEC-43, DEC-47, DEC-48, DEC-49
+**Versión:** 1.3 · **Fecha:** 2026-10-30 · **Responsable ML:** Hikari · **Consumidor:** Frontend (Streamlit)
+**Decisiones relacionadas:** DEC-12, DEC-14, DEC-41, DEC-42, DEC-43, DEC-47, DEC-48, DEC-49, DEC-50
 
 El dashboard **solo lee ficheros Parquet de `data/gold/`**. No carga modelos, no lee Bronze ni Silver y no accede a fuentes externas (NF2, apartado 5.6). Este documento fija qué garantiza Gold y qué debe hacer el dashboard con cada caso.
 
@@ -36,6 +36,9 @@ Ambos se regeneran con `python -m src.ml.inferir`. Tras cada regeneración se co
 | `id_prediccion` | texto | Clave foránea a `predicciones` |
 | `variable` | texto | Nombre de la variable (ver tabla de etiquetas en 5.2) |
 | `valor_shap` | decimal | Contribución en **log-odds**. Positivo = sube el riesgo; negativo = lo baja |
+| `valor_variable` | decimal | Valor de la variable el día D. Nulo si faltaba (DEC-50) |
+| `valor_base` | decimal | Valor esperado del modelo, en log-odds; igual en las 5 filas de una predicción (DEC-50) |
+| `shap_resto` | decimal | Suma de las contribuciones de las variables fuera del top-5; igual en las 5 filas (DEC-50) |
 
 **Compatibilidad:** el dashboard debe ignorar las columnas que no conozca y no depender del orden de las columnas. Se pueden añadir columnas (ver sección 7) sin avisar de ruptura.
 
@@ -141,7 +144,7 @@ Mostrarla como «Prioridad relativa hoy: top 12 %». **No usarla para definir el
 ### 5.1 Qué contienen y qué no
 
 - Solo las **5 variables con mayor |SHAP|** de cada predicción, en log-odds.
-- **No incluyen el valor de la variable** (no se puede mostrar «humedad = 38 %») **ni el valor base**, así que la suma de barras no reconstruye la probabilidad. Esto se ampliará (sección 7).
+- Con la ampliación de DEC-50 incluyen `valor_variable` (para mostrar «humedad = 38»), `valor_base` y `shap_resto`. Con ellas, `logit(probabilidad) = valor_base + suma(valor_shap) + shap_resto`. **Hasta regenerar Gold con `inferir --reemplazar`, esas tres columnas pueden no existir o ser nulas:** el dashboard debe comprobarlo y, si faltan, mostrar solo las barras sin valores.
 - Las variables del FWI (`ffmc`, `dmc`, `dc`, `isi`, `bui`, `fwi`) están correlacionadas: SHAP reparte el efecto entre ellas. Conviene mostrarlas como «Condiciones de sequía (índices FWI)» o aclarar que no son causas independientes.
 
 ### 5.2 Etiquetas legibles
@@ -166,12 +169,12 @@ Mostrarla como «Prioridad relativa hoy: top 12 %». **No usarla para definir el
 `src/explainability/plots.py` ya genera la figura a partir de las tablas de Gold, sin cargar el modelo:
 
 ```python
-from src.explainability.plots import fig_local
+from src.explainability.plots import ETIQUETAS, fig_cascada, fig_local
 
 expl = pd.read_parquet("data/gold/explicaciones.parquet",
                        filters=[("id_prediccion", "==", id_pred)])
-fig = fig_local(expl, id_pred, "log-odds")
-fig.update_layout(title=f"{nombre} · {fecha:%d/%m/%Y}")     # el título por defecto no incluye municipio ni fecha
+fig = fig_local(expl, id_pred, "log-odds", titulo=f"{nombre} · {fecha:%d/%m/%Y}",
+                etiquetas=ETIQUETAS, mostrar_valores=True, incluir_resto=True)   # valores y resto requieren DEC-50
 ```
 
 La figura ya cumple la accesibilidad: el sentido de cada barra se indica también con texto («+0,40 (sube el riesgo)»). En el dashboard, sustituir el eje «log-odds» por un texto no técnico, p. ej. «Contribución al índice de riesgo».
@@ -194,7 +197,7 @@ La figura ya cumple la accesibilidad: el sentido de cada barra se indica tambié
 
 | Cambio | Origen | Efecto en el dashboard |
 |---|---|---|
-| Columnas `valor_variable` y `valor_base` en `explicaciones.parquet` | Pendiente de DEC-43 | Permitirá mostrar el valor real de cada variable y reconstruir la probabilidad. No rompe nada |
+| Regenerar Gold con las columnas de DEC-50 (`valor_variable`, `valor_base`, `shap_resto`) | DEC-50 | Ya implementado en ML. Hasta regenerar, pueden faltar o ser nulas |
 | Nuevos umbrales o forma de definir los niveles | DEC-49 | Cambian los valores de `nivel_riesgo`, no las columnas. No fijar umbrales en el código |
 | `version_modelo` distinta de `v1` (p. ej. `v2`) tras reentrenar | HU-11 | No suponer que solo existe `v1`; tratar como respaldo todo lo que termine en `-respaldo` |
 | Columna indicando el modelo de respaldo | Posible | Hoy se deduce del sufijo de `version_modelo` |

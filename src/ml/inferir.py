@@ -189,16 +189,32 @@ def escribir_ejemplos(dir_: Path, bundle, pred: pd.DataFrame, expl: pd.DataFrame
     fila = ultimo.sort_values("probabilidad", ascending=False).iloc[0]
     unidades = shap_explain.shap_units(bundle)
     salidas = []
-    ruta = dir_ / f"shap_local_{fila['id_municipio']}_{pd.Timestamp(fila['fecha_objetivo']):%Y-%m-%d}.html"
-    plots.fig_local(expl, fila["id_prediccion"], unidades).write_html(ruta, include_plotlyjs="cdn")
+    fecha_obj = pd.Timestamp(fila["fecha_objetivo"])
+    sufijo = f"{fila['id_municipio']}_{fecha_obj:%Y-%m-%d}"
+    titulo = (f"Municipio {fila['id_municipio']} · {fecha_obj:%d/%m/%Y} · índice de riesgo "
+              f"{100 * fila['probabilidad']:.1f} % ({fila['nivel_riesgo']})".replace(".", ","))
+    ampliada = "valor_variable" in expl.columns
+    ruta = dir_ / f"shap_local_{sufijo}.html"
+    plots.fig_local(expl, fila["id_prediccion"], unidades, titulo=titulo, etiquetas=plots.ETIQUETAS,
+                    mostrar_valores=ampliada, incluir_resto="shap_resto" in expl.columns
+                    ).write_html(ruta, include_plotlyjs="cdn")
     salidas.append(ruta)
+    if "valor_base" in expl.columns:
+        ruta_c = dir_ / f"shap_cascada_{sufijo}.html"
+        plots.fig_cascada(expl, fila["id_prediccion"], unidades, titulo=titulo, etiquetas=plots.ETIQUETAS
+                          ).write_html(ruta_c, include_plotlyjs="cdn")
+        salidas.append(ruta_c)
 
     val = todo[(todo[config.COL_PARTICION] == config.PART_VAL) & (todo[config.COL_RESERVADO] == 0)]
     if not val.empty:
         imp = shap_explain.global_importance(bundle, val)
         imp.to_csv(dir_ / "shap_global.csv", index=False)
         plots.fig_global(imp).write_html(dir_ / "shap_global.html", include_plotlyjs="cdn")
-        salidas += [dir_ / "shap_global.csv", dir_ / "shap_global.html"]
+        grupos = shap_explain.global_importance(bundle, val, por_grupo=True)
+        grupos.to_csv(dir_ / "shap_global_grupos.csv", index=False)
+        plots.fig_global(grupos).write_html(dir_ / "shap_global_grupos.html", include_plotlyjs="cdn")
+        salidas += [dir_ / "shap_global.csv", dir_ / "shap_global.html",
+                    dir_ / "shap_global_grupos.csv", dir_ / "shap_global_grupos.html"]
     return salidas
 
 
@@ -253,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
         if not dentro.empty:
             principal = predict.build_predictions(dentro, bundle, thr, desde=desde, hasta=hasta)
             preds.append(principal)
-            expls.append(shap_explain.build_explanations(principal, todo, bundle, top_k=a.top_k))
+            expls.append(shap_explain.build_explanations(principal, todo, bundle, top_k=a.top_k, verificar=True))
         n_respaldo = 0
         if a.modelo_respaldo and not fuera.empty:
             b2, t2 = cargar(a.models_dir, a.modelo_respaldo)
@@ -264,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
                 p2 = predict.build_predictions(ok, b2, t2, desde=desde, hasta=hasta,
                                                version_modelo=f"{b2.version}-respaldo")
                 preds.append(p2)
-                expls.append(shap_explain.build_explanations(p2, todo, b2, top_k=a.top_k))
+                expls.append(shap_explain.build_explanations(p2, todo, b2, top_k=a.top_k, verificar=True))
                 n_respaldo = len(p2)
         if not preds:
             raise ValueError("No hay filas predecibles en el rango: todas quedan fuera del dominio del modelo o sin "
