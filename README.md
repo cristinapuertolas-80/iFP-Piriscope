@@ -161,11 +161,15 @@ También se pueden ejecutar los módulos por separado: `python -m src.ml.inferir
 
 ### 7. Lanzar el dashboard
 
-El dashboard solo lee `predicciones.parquet` y `explicaciones.parquet` de Gold, que descarga del dataset de Hugging Face al arrancar (necesita `HF_TOKEN` de lectura en `.env`; sin conexión usa `data/gold/`). El contrato de datos con ML está en [docs/contrato_dashboard_gold.md](docs/contrato_dashboard_gold.md) y el detalle del dashboard en [src/dashboard/README.md](src/dashboard/README.md).
+Para solo ver el dashboard **no hace falta ningún paso anterior**: basta con clonar el repositorio y ejecutar
 
 ```bash
-streamlit run src/dashboard/app.py
+python run_dashboard.py
 ```
+
+La primera vez crea `.venv` (o usa el entorno activo), instala solo las librerías del dashboard, pide un token de lectura de Hugging Face y lo guarda en `.env`, y comprueba el acceso al dataset; si tu cuenta aún no lo tiene, te dice dónde aceptarlo. Después abre el dashboard en el navegador. Las siguientes veces solo lo abre. Opciones: `--cambiar-token`, `--local` (usa `data/gold/` en lugar de Hugging Face) y `--solo-preparar`.
+
+El dashboard solo lee `predicciones.parquet` y `explicaciones.parquet` de Gold, que descarga del dataset de Hugging Face (sin conexión usa `data/gold/`). Con el entorno ya preparado también se puede lanzar con `streamlit run src/dashboard/app.py`. El contrato de datos con ML está en [docs/contrato_dashboard_gold.md](docs/contrato_dashboard_gold.md) y el detalle del dashboard en [src/dashboard/README.md](src/dashboard/README.md).
 
 ### 8. Ejecutar los tests
 
