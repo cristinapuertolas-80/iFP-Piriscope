@@ -14,6 +14,7 @@ Ejemplos::
     python run_pipeline.py --desde 2020-01-01 --hasta 2024-12-31 --etapas ingesta silver
     python run_pipeline.py --desde 2024-01-01 --hasta 2024-12-31 --fuentes aemet effis --subir-hf
     python run_pipeline.py --etapas gold ml                                  # Gold + predicciones del último día (modelo v1)
+    python run_pipeline.py --etapas ml --descargar-modelos                   # baja v1 de Hugging Face y predice
     python run_pipeline.py --etapas ml --inferir-desde 2026-09-01 --inferir-hasta 2026-10-20
     python run_pipeline.py --etapas gold ml --ml-acciones entrenar inferir --version-modelo v2   # reentrenar
 """
@@ -153,7 +154,7 @@ def verificar_salidas(principal: str, respaldo: str) -> bool:
 
 def etapa_ml(acciones: list[str], version: str, principal: str | None, respaldo: str | None,
              sobrescribir_modelo: bool, inferir_desde: date | None, inferir_hasta: date | None,
-             reemplazar: bool, ejemplo_dir: Path | None, verificar: bool) -> bool:
+             reemplazar: bool, ejemplo_dir: Path | None, verificar: bool, descargar_modelos: bool = False) -> bool:
     from src.ml import config, experimento, inferir
 
     models_dir = Path(config.MODELS_DIR)
@@ -173,6 +174,13 @@ def etapa_ml(acciones: list[str], version: str, principal: str | None, respaldo:
             return False
     if "inferir" in acciones:
         log.info("=== ML: inferencia batch D+1 y SHAP ===")
+        if descargar_modelos:
+            from src.ml import modelos_hf
+            try:
+                modelos_hf.descargar_modelos(version, models_dir)
+            except Exception:  # noqa: BLE001 - se informa y la etapa falla
+                log.exception("No se pudieron descargar de Hugging Face los modelos %s", version)
+                return False
         try:
             modelo, modelo_respaldo = resolver_modelos(models_dir, version, principal, respaldo)
         except ValueError as e:
@@ -218,6 +226,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="empieza de cero: descarta TODO el contenido anterior de predicciones y explicaciones")
     ml.add_argument("--ejemplo-dir", type=Path, default=None, help="carpeta para las figuras SHAP de ejemplo")
     ml.add_argument("--sin-verificar", action="store_true", help="no ejecutar verificar_salidas.py tras la inferencia")
+    ml.add_argument("--descargar-modelos", action="store_true",
+                    help="bajar antes de Hugging Face los modelos de --version-modelo a models/ (no hace falta reentrenar)")
     p.add_argument("--continuar", action="store_true", help="seguir con las etapas siguientes aunque falle Silver, Gold o ML")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
@@ -242,7 +252,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             exito = etapa_ml(args.ml_acciones, args.version_modelo, args.modelo, args.modelo_respaldo,
                              args.sobrescribir_modelo, args.inferir_desde, args.inferir_hasta,
-                             args.reemplazar_predicciones, args.ejemplo_dir, not args.sin_verificar)
+                             args.reemplazar_predicciones, args.ejemplo_dir, not args.sin_verificar,
+                             args.descargar_modelos)
         ok &= exito
         if not exito and etapa in BLOQUEANTES and not args.continuar:
             log.error("La etapa %s ha fallado: se detiene el pipeline (usa --continuar para seguir)", etapa)

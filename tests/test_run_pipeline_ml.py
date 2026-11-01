@@ -207,3 +207,29 @@ def test_sin_script_de_verificacion_la_etapa_falla(monkeypatch, tmp_path):
     monkeypatch.setattr(rp, "SCRIPT_VERIFICAR", tmp_path / "no_existe.py")
     monkeypatch.setattr(rp.subprocess, "run", lambda *a, **k: pytest.fail("no debe ejecutarse"))
     assert rp.verificar_salidas("m", "r") is False
+
+
+def test_descargar_modelos_antes_de_inferir(ml, monkeypatch):
+    from src.ml import modelos_hf
+
+    pedidas = []
+
+    def descargar(version, destino):
+        pedidas.append((version, destino))
+        ml["guardar_modelos"](version)
+
+    monkeypatch.setattr(modelos_hf, "descargar_modelos", descargar)
+    assert rp.main(["--etapas", "ml", "--descargar-modelos"]) == 0
+    assert pedidas and pedidas[0][0] == "v1"
+    assert valor(ml["inferir"][0], "--modelo").startswith("v1_")
+
+
+def test_si_falla_la_descarga_de_modelos_no_se_infiere(ml, monkeypatch):
+    from src.ml import modelos_hf
+
+    def falla(*a, **k):
+        raise FileNotFoundError("sin modelos en el dataset")
+
+    monkeypatch.setattr(modelos_hf, "descargar_modelos", falla)
+    assert rp.main(["--etapas", "ml", "--descargar-modelos"]) == 1
+    assert ml["inferir"] == []
