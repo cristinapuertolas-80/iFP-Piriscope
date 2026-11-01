@@ -5,9 +5,10 @@
 **Sistema de estimación diaria de riesgo de incendio forestal por municipio**
 Proyecto del módulo C088 · Proyecto de Inteligencia Artificial y Big Data · Grupo 6
 
-![Estado](https://img.shields.io/badge/Estado-En%20desarrollo-orange)
-![Fase](https://img.shields.io/badge/Fase-3%20·%20Ingesta%20de%20datos-lightgrey)
-![Python](https://img.shields.io/badge/Python-3.x-blue)
+![Estado](https://img.shields.io/badge/Estado-Producto%20funcional%20en%20local-green)
+![Fase](https://img.shields.io/badge/Fase-NF3%20·%20Producto%20funcional-blue)
+![Python](https://img.shields.io/badge/Python-3.12%20(%E2%89%A5%203.10)-blue)
+[![Tests](https://github.com/cristinapuertolas-80/iFP-Piriscope/actions/workflows/tests.yml/badge.svg)](https://github.com/cristinapuertolas-80/iFP-Piriscope/actions/workflows/tests.yml)
 
 ---
 
@@ -67,18 +68,21 @@ El sistema se organiza como un **pipeline de datos con arquitectura medallón** 
 - **Ingesta automática:** workflows programados (cron) de GitHub Actions que suben los datos al dataset usando un token `HF_TOKEN` guardado en los Secrets del repositorio.
 - **Despliegue monolítico:** frontend y backend en Streamlit, pero con la lógica separada en módulos de `src/` que solo se comunican mediante ficheros Parquet y el modelo serializado.
 
+El diagrama anterior es el del diseño (NF2). La arquitectura **tal como está implementada** (módulos, comandos, ficheros intermedios, Hugging Face y workflows) está en [docs/arquitectura_implementada.png](docs/arquitectura_implementada.png).
+
 Más detalle en la [documentación y diseño técnico](docs/NF2_Documentacion_y_Diseno_Tecnico.pdf) y en el [registro de decisiones](docs/decisiones.md).
 
 ---
 
 ## ▶️ Cómo ejecutar
 
-> 🚧 **El proyecto está en desarrollo.** La **ingesta de datos** ([`src/ingest`](src/ingest/README.md)), la **capa Silver** ([`src/silver`](src/silver/README.md)), la **capa Gold** ([`src/features`](src/features/README.md)) y los módulos de **ML y explicabilidad** ([`src/ml`](src/ml/README.md), [`src/explainability`](src/explainability/README.md)) ya están implementados y se ejecutan desde `run_pipeline.py`. El **dashboard** ([`src/dashboard`](src/dashboard/README.md)) se lanza con Streamlit.
+> ✅ **Producto funcional en local (NF3).** La **ingesta de datos** ([`src/ingest`](src/ingest/README.md)), la **capa Silver** ([`src/silver`](src/silver/README.md)), la **capa Gold** ([`src/features`](src/features/README.md)) y los módulos de **ML y explicabilidad** ([`src/ml`](src/ml/README.md), [`src/explainability`](src/explainability/README.md)) ya están implementados y se ejecutan desde `run_pipeline.py`. El **dashboard** ([`src/dashboard`](src/dashboard/README.md)) se lanza con Streamlit. Lo que falta para NF4 está en [Limitaciones y pendientes](#-limitaciones-y-pendientes).
 
 ### 1. Requisitos previos
 
-- Python 3.x y Git
-- Una **API key de AEMET OpenData** (gratuita): se solicita en [opendata.aemet.es](https://opendata.aemet.es/centrodedescargas/inicio)
+- Python **3.12** (probado; vale ≥ 3.10) y Git
+- Una cuenta de **Hugging Face** con acceso aceptado al dataset [cpuertolas/piriscope](https://huggingface.co/datasets/cpuertolas/piriscope) (es de acceso restringido) y un token de **lectura**. Con eso basta para ejecutar todo desde los datos archivados, sin claves de las fuentes
+- *(Solo para descargar datos nuevos de las fuentes)* una **API key de AEMET OpenData** (gratuita): se solicita en [opendata.aemet.es](https://opendata.aemet.es/centrodedescargas/inicio)
 - *(Solo para la ingesta automática)* un token de Hugging Face con permiso de escritura sobre el dataset
 
 ### 2. Clonar el repositorio e instalar el entorno
@@ -90,8 +94,11 @@ cd iFP-Piriscope
 python -m venv .venv
 source .venv/bin/activate          # En Windows: .venv\Scripts\activate
 
-pip install -r environment/requirements.txt
+pip install -r environment/requirements-lock.txt   # versiones exactas probadas (recomendado)
+# o, con rangos de versiones: pip install -r environment/requirements.txt
 ```
+
+`environment/requirements-lock.txt` fija las versiones exactas con las que pasan los tests y se generan las evidencias (Python 3.12). `requirements.txt` declara los rangos mínimos y `requirements-dashboard.txt`, solo lo necesario para el dashboard.
 
 ### 3. Configurar las credenciales
 
@@ -160,6 +167,25 @@ python run_pipeline.py --etapas gold ml --ml-acciones entrenar inferir --version
 
 También se pueden ejecutar los módulos por separado: `python -m src.ml.inferir`, `python -m src.ml.experimento` y `python -m src.ml.walkforward` (opciones y ejemplos en [src/ml/README.md](src/ml/README.md)).
 
+### 6 bis. Reproducir todo el pipeline desde los datos archivados (sin claves de las fuentes)
+
+Los originales de cada ingesta están archivados en `raw/` del dataset de Hugging Face y los modelos versionados en `models/`, así que el producto completo se puede levantar desde cero solo con el token de lectura en `.env` (`HF_TOKEN=...`). En este orden:
+
+```bash
+python -m src.silver --descargar-hf                       # 1. Bronze archivado (raw/) -> Silver   (~7 min)
+python run_pipeline.py --etapas gold                      # 2. Silver -> Gold                      (~10 s)
+python run_pipeline.py --etapas ml --descargar-modelos \
+       --inferir-desde 2026-10-01                         # 3. modelo v1 -> predicciones D+1, SHAP y verificación (~15 s)
+python run_dashboard.py --local                           # 4. dashboard sobre la Gold generada (http://localhost:8501)
+```
+
+- El paso 3 baja `models/v1_*` de Hugging Face (`python -m src.ml.modelos_hf`), predice desde la fecha indicada hasta el último día con datos y ejecuta `scripts/verificar_salidas.py`; si alguna comprobación falla, el pipeline termina con error.
+- Sin `--inferir-desde` predice solo el último día. Para escribir las predicciones nuevas sobre las publicadas, copia antes a `data/gold/` los `predicciones.parquet` y `explicaciones.parquet` del dataset (es lo que hace el workflow de evidencias).
+- Duraciones medidas en un runner estándar de GitHub Actions (`ubuntu-latest`); la memoria máxima fue de ~2,8 GB en Gold.
+- `python scripts/comparar_predicciones.py --referencia <publicadas> --nuevo data/gold/predicciones.parquet` comprueba que las predicciones regeneradas coinciden con las publicadas.
+
+El workflow [`evidencias.yml`](.github/workflows/evidencias.yml) ejecuta exactamente estos pasos en una máquina limpia, arranca el dashboard, comprueba que responde, lo captura y publica el resultado en la rama [`evidencias/nf3`](https://github.com/cristinapuertolas-80/iFP-Piriscope/tree/evidencias/nf3).
+
 ### 7. Lanzar el dashboard
 
 Para solo ver el dashboard **no hace falta ningún paso anterior**: basta con clonar el repositorio y ejecutar
@@ -178,13 +204,28 @@ El dashboard solo lee `predicciones.parquet` y `explicaciones.parquet` de Gold, 
 pytest
 ```
 
-Los tests también se ejecutan automáticamente con **GitHub Actions** en cada Pull Request.
+Los tests también se ejecutan automáticamente con **GitHub Actions** en cada Pull Request y en `main` ([`tests.yml`](.github/workflows/tests.yml)), con las versiones del lockfile, y guardan el informe JUnit. No necesitan red ni datos reales: usan datos de juguete con el esquema de cada capa y dobles de las APIs. Las comprobaciones sobre los datos reales (validación de Silver, `verificar_salidas.py`, reproducibilidad de las predicciones) se ejecutan en [`evidencias.yml`](.github/workflows/evidencias.yml).
+
+---
+
+## 🚧 Limitaciones y pendientes
+
+Estado a la entrega de NF3. El detalle de cada punto está en [docs/decisiones.md](docs/decisiones.md) (sección *Decisiones pendientes*) y en [src/ml/README.md](src/ml/README.md).
+
+- **Las predicciones no se actualizan solas.** La ingesta es automática (cron), pero Silver, Gold e inferencia se lanzan a mano con `run_pipeline.py`, y el repositorio no tiene comando para subir a Hugging Face la Gold ni los modelos (Silver sí: `--subir-hf`). El dashboard muestra la última fecha publicada, no la de hoy.
+- **El FWI llega con retraso**: los últimos días se predicen con el modelo de respaldo (sin FWI), que no mejora al FWI y discrimina poco (pocos valores distintos por día).
+- **Rendimiento modesto** frente al FWI, un solo año de test, **A Coruña no mejora** al FWI y la probabilidad no está calibrada (se presenta como índice de riesgo). Política de niveles provisional (DEC-49): en sequía casi todos los municipios quedan en «medio» o «alto».
+- **Cobertura**: ~25 municipios sin ninguna variable meteorológica en los días recientes aparecen como «Sin dato» (cobertura ≥ 80 % en todas las fechas). El viento se excluyó por tener ~57 % de nulos.
+- **Fuentes con paso manual**: las exportaciones de EGIF y los recintos del CNIG se dejan en `data/landing/`; la ingesta de AEMET y del FWI necesita sus claves.
+- **Pendiente de verificar con datos reales**: el reentrenamiento reproducible (`--ml-acciones entrenar`), comparar el FWI intermedio con el consolidado y contrastar las etiquetas de 2022-2023 con las estadísticas definitivas de EGIF.
+- **El dataset de Hugging Face es de acceso restringido**: reproducir requiere una cuenta con acceso aceptado.
+- **Detalles de interfaz**: en la tabla del día, las celdas sin valor (FWI de las estimaciones sin FWI, municipios sin dato) aparecen como «None», que es como `st.dataframe` pinta los nulos; y en la explicación SHAP el título del eje horizontal se corta en algunos anchos de pantalla.
 
 ---
 
 ## 📈 Resultados de la evaluación
 
-Con el año de test (2023), el modelo con FWI supera al FWI en AUC-PR en los tres escenarios: municipios vistos (0,028 frente a 0,019), municipios no vistos (0,094 frente a 0,069) y no vistos en 2023 (0,038 frente a 0,021). El modelo sin FWI, que se usa como respaldo cuando falta el FWI, equivale al FWI. La ventaja es **modesta**, no se da en A Coruña, y la probabilidad está sobrestimada, por lo que se presenta como índice de riesgo. Tablas, intervalos y limitaciones: [docs/resultados](docs/resultados/README.md) y [src/ml/README.md](src/ml/README.md).
+Con el año de test (2023), el modelo con FWI supera al FWI en AUC-PR en los tres escenarios: municipios vistos (0,028 frente a 0,019), municipios no vistos (0,093 frente a 0,069) y no vistos en 2023 (0,038 frente a 0,021). El modelo sin FWI, que se usa como respaldo cuando falta el FWI, equivale al FWI. La ventaja es **modesta**, no se da en A Coruña, y la probabilidad está sobrestimada, por lo que se presenta como índice de riesgo. Tablas, intervalos y limitaciones: [docs/resultados](docs/resultados/README.md) y [src/ml/README.md](src/ml/README.md).
 
 ---
 
@@ -206,40 +247,50 @@ Con el año de test (2023), el modelo con FWI supera al FWI en AUC-PR en los tre
 
 ## 📁 Estructura del repositorio
 
+Estructura real del repositorio (se omiten los `__init__.py`). Los módulos de `src/` solo se comunican mediante ficheros Parquet de `data/` y los modelos de `models/`.
+
 ```
-repo/
-├── docs/                                  # Documentación del proyecto
-│   ├── NF1_Presentacion_y_Viabilidad.pdf
-│   ├── NF2_Documentacion_y_Diseno_Tecnico.pdf
-│   ├── arquitectura.png                   # Diagrama de arquitectura
-│   ├── municipios_reservados.csv          # Municipios reservados para evaluación geográfica
-│   ├── tabla_equivalencias.csv            # Equivalencias de códigos INE históricos
-│   ├── decisiones.md                      # Registro de decisiones técnicas
-│   ├── contrato_dashboard_gold.md         # Contrato de datos entre ML y dashboard (capa Gold)
-│   └── resultados/                        # Informes de evaluación (final y walk-forward)
+iFP-Piriscope/
+├── run_pipeline.py                 # Orquestador único: ingesta → Silver → Gold → ML (entrenar / inferir / verificar)
+├── run_dashboard.py                # Lanzador del dashboard en un comando (entorno, token de HF, arranque)
+├── pytest.ini · .env.example · .gitignore · .gitattributes · README.md · CONTRIBUTING.md
 │
-├── src/                                   # Código fuente
-│   ├── ingest/                            # Descarga e ingesta de las fuentes (Bronze)
-│   ├── silver/                            # Limpieza, tipado y cruce espacio-temporal (Silver)
-│   ├── features/                          # Variables derivadas y dataset final (Gold)
-│   ├── ml/                                # Entrenamiento, evaluación e inferencia
-│   ├── explainability/                    # Explicaciones SHAP
-│   └── dashboard/                         # Aplicación Streamlit
+├── src/
+│   ├── ingest/                     # Bronze: descarga de las fuentes y archivo en Hugging Face
+│   │   ├── cli.py · __main__.py    #   python -m src.ingest <fuente>
+│   │   ├── aemet.py · effis.py · egif.py · ine_cnig.py   # un módulo por fuente
+│   │   ├── common.py · config.py   #   manifiestos, reintentos, errores de red, configuración (.env)
+│   │   └── hf_hub.py               #   subida/descarga de raw/<FUENTE>/<timestamp>
+│   ├── silver/                     # Silver: limpieza, tipado y cruce espacio-temporal (Parquet)
+│   │   ├── pipeline.py · __main__.py            # python -m src.silver
+│   │   ├── municipios.py · meteo.py · fwi.py · incendios.py   # una tabla por entidad del modelo de datos
+│   │   ├── geo.py · fuentes.py · almacen.py     #   utilidades geoespaciales, lectura de Bronze, escritura
+│   │   ├── calidad.py · validacion.py · muestra_validacion.py   # controles de calidad y validación
+│   │   └── hf_hub.py
+│   ├── features/                   # Gold: variables derivadas y datasets municipio-día
+│   │   ├── derived.py · dataset.py · __main__.py   # python -m src.features
+│   ├── ml/                         # Entrenamiento, evaluación, inferencia batch D+1
+│   │   ├── config.py · splits.py · train.py · evaluate.py · risk.py · predict.py
+│   │   ├── experimento.py · walkforward.py · reservados.py
+│   │   ├── inferir.py              #   inferencia con modelo principal y de respaldo + SHAP
+│   │   └── modelos_hf.py           #   descarga de los modelos versionados de Hugging Face
+│   ├── explainability/             # SHAP: valores, top-5 por predicción, gráficos
+│   │   └── config.py · shap_explain.py · plots.py
+│   └── dashboard/                  # Streamlit: solo lee Gold
+│       ├── app.py · datos.py · graficos.py
+│       └── assets/municipios_galicia.geojson
 │
-├── data/                                  # Datos (no versionados, solo .gitkeep)
-│   ├── bronze/                            # Datos crudos originales
-│   ├── silver/                            # Datos limpios en Parquet
-│   └── gold/                              # Dataset final, predicciones y SHAP
-│
-├── models/                                # Modelos serializados y versionados
-├── scripts/                               # Carga inicial de datos (.sh y .ps1)
-├── environment/                           # Configuración del entorno
-├── README.md
-├── CONTRIBUTING.md
-└── .gitignore
+├── tests/                          # pytest (sin red ni datos reales: datos de juguete y dobles)
+├── scripts/                        # Carga inicial (.sh/.ps1), verificación y análisis auxiliares, capturas
+├── environment/                    # requirements.txt · requirements-lock.txt · requirements-dashboard.txt
+├── docs/                           # NF1, NF2, arquitectura, decisiones, contrato Gold, resultados
+│   └── resultados/                 #   informes de evaluación, SHAP global y ejemplos
+├── .github/workflows/              # tests.yml (cada PR) · ingesta.yml (cron) · evidencias.yml (NF3)
+├── data/{bronze,silver,gold}/      # Datos (no versionados: solo .gitkeep; viven en Hugging Face)
+└── models/                         # Modelos serializados (no versionados: viven en Hugging Face)
 ```
 
-Los datos de `data/` no se suben al repositorio por su tamaño; se obtienen ejecutando el pipeline o desde el dataset de Hugging Face.
+Cada carpeta de `src/` tiene su propio README con el detalle de sus módulos. Los datos de `data/` y los modelos de `models/` no se suben a GitHub por su tamaño: están en el dataset de Hugging Face [cpuertolas/piriscope](https://huggingface.co/datasets/cpuertolas/piriscope) (`raw/`, `data/silver/`, `data/gold/`, `models/`) y se obtienen ejecutando el pipeline o descargándolos.
 
 ---
 

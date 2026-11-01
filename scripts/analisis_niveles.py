@@ -13,18 +13,23 @@ optimistas y solo sirven para comparar políticas entre sí. 2022 son ~1.200 pos
 repite el análisis con el walk-forward 2016-2022 de DEC-47. NO uses el test de 2023 (DEC-47).
 
 Uso (desde la raíz del repositorio):
-    python -m src.ml.analisis_niveles --modelo v1_xgboost_con_fwi-sin_viento-desde2009
+    python scripts/analisis_niveles.py --modelo v1_xgboost_con_fwi-sin_viento-desde2009
 """
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from . import config, splits, train
-from .inferir import cargar
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:  # el script vive en scripts/ desde que salió de src/ml/
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.ml import config, splits, train  # noqa: E402
+from src.ml.inferir import cargar  # noqa: E402
 
 pd.set_option("display.width", 200)
 
