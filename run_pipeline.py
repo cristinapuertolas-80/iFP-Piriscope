@@ -16,6 +16,7 @@ Ejemplos::
     python run_pipeline.py --etapas gold ml                                  # Gold + predicciones del último día (modelo v1)
     python run_pipeline.py --etapas ml --inferir-desde 2026-09-01 --inferir-hasta 2026-10-20
     python run_pipeline.py --etapas gold ml --ml-acciones entrenar inferir --version-modelo v2   # reentrenar
+    python run_pipeline.py --etapas ml --subir-hf          # predecir, verificar y publicar las predicciones en Hugging Face
 """
 
 from __future__ import annotations
@@ -145,8 +146,8 @@ def verificar_salidas(principal: str, respaldo: str) -> bool:
 
 def etapa_ml(acciones: list[str], version: str, principal: str | None, respaldo: str | None,
              sobrescribir_modelo: bool, inferir_desde: date | None, inferir_hasta: date | None,
-             reemplazar: bool, ejemplo_dir: Path | None, verificar: bool) -> bool:
-    from src.ml import config, experimento, inferir
+             reemplazar: bool, ejemplo_dir: Path | None, verificar: bool, subir_hf: bool = False) -> bool:
+    from src.ml import config, experimento, hf_hub, inferir
 
     models_dir = Path(config.MODELS_DIR)
     if "entrenar" in acciones:
@@ -185,6 +186,14 @@ def etapa_ml(acciones: list[str], version: str, principal: str | None, respaldo:
         if verificar and not verificar_salidas(modelo, modelo_respaldo):
             log.error("La verificación de las salidas ha encontrado problemas")
             return False
+        if subir_hf:
+            log.info("=== ML: publicación de las predicciones en Hugging Face ===")
+            try:
+                url = hf_hub.subir_gold()
+            except Exception as e:  # noqa: BLE001 - se informa y la etapa devuelve error
+                log.error("No se pudo publicar Gold en Hugging Face: %s", e)
+                return False
+            log.info("Gold publicado: %s", url)
     return True
 
 
@@ -195,7 +204,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--etapas", nargs="+", choices=ETAPAS, default=list(ETAPAS))
     p.add_argument("--fuentes", nargs="+", choices=FUENTES, default=list(FUENTES))
     p.add_argument("--subir-hf", action="store_true",
-                   help="Subir a Hugging Face los originales (ingesta) y data/silver (Silver)")
+                   help="Subir a Hugging Face los originales (ingesta), data/silver (Silver) y las predicciones de Gold (ml)")
     ml = p.add_argument_group("etapa ml")
     ml.add_argument("--ml-acciones", nargs="+", choices=ACCIONES_ML, default=["inferir"],
                     help="por defecto solo inferir; añade `entrenar` para reentrenar y guardar un modelo nuevo")
@@ -234,7 +243,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             exito = etapa_ml(args.ml_acciones, args.version_modelo, args.modelo, args.modelo_respaldo,
                              args.sobrescribir_modelo, args.inferir_desde, args.inferir_hasta,
-                             args.reemplazar_predicciones, args.ejemplo_dir, not args.sin_verificar)
+                             args.reemplazar_predicciones, args.ejemplo_dir, not args.sin_verificar, args.subir_hf)
         ok &= exito
         if not exito and etapa in BLOQUEANTES and not args.continuar:
             log.error("La etapa %s ha fallado: se detiene el pipeline (usa --continuar para seguir)", etapa)
