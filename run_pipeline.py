@@ -129,14 +129,22 @@ def resolver_modelos(models_dir: Path, version: str, principal: str | None, resp
     return elegir("principal", principal, "_con_fwi"), elegir("de respaldo", respaldo, "_sin_fwi")
 
 
+#: Script de verificación de las salidas de Gold (se movió de `src/ml/` a `scripts/`).
+SCRIPT_VERIFICAR = Path(__file__).resolve().parent / "scripts" / "verificar_salidas.py"
+
+
 def verificar_salidas(principal: str, respaldo: str) -> bool:
-    """Ejecuta `src/ml/verificar_salidas.py` sobre las salidas de Gold (si existe el script)."""
+    """Ejecuta `scripts/verificar_salidas.py` sobre las salidas de Gold.
+
+    Si el script no existe, la etapa falla: omitir la verificación en silencio dejaría pasar salidas sin comprobar
+    (se puede desactivar a propósito con `--sin-verificar`).
+    """
     from src.ml import config
 
-    script = Path(__file__).resolve().parent / "src" / "ml" / "verificar_salidas.py"
+    script = SCRIPT_VERIFICAR
     if not script.exists():
-        log.warning("No existe %s; se omite la verificación de las salidas", script)
-        return True
+        log.error("No existe %s; no se pueden verificar las salidas (usa --sin-verificar para omitirlo)", script)
+        return False
     cmd = [sys.executable, str(script), "--pred", str(config.PREDICCIONES_PARQUET),
            "--expl", str(config.EXPLICACIONES_PARQUET), "--dataset", str(config.GOLD_DIR / "dataset_municipio_dia.parquet"),
            "--models-dir", str(config.MODELS_DIR), "--modelo", principal, "--respaldo", respaldo]
