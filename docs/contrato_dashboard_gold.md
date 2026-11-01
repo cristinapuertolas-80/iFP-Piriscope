@@ -1,6 +1,6 @@
 # Contrato de datos entre ML y Dashboard (capa Gold)
 
-**Versión:** 1.3 · **Fecha:** 2026-10-30 · **Responsable ML:** Hikari · **Consumidor:** Frontend (Streamlit)
+**Versión:** 1.4 · **Fecha:** 2026-10-31 · **Responsable ML:** Hikari · **Consumidor:** Frontend (Streamlit)
 **Decisiones relacionadas:** DEC-12, DEC-14, DEC-41, DEC-42, DEC-43, DEC-47, DEC-48, DEC-49, DEC-50
 
 El dashboard **solo lee ficheros Parquet de `data/gold/`**. No carga modelos, no lee Bronze ni Silver y no accede a fuentes externas (NF2, apartado 5.6). Este documento fija qué garantiza Gold y qué debe hacer el dashboard con cada caso.
@@ -204,13 +204,15 @@ La figura ya cumple la accesibilidad: el sentido de cada barra se indica tambié
 
 ---
 
-## 8. Pendiente de acordar con Frontend
+## 8. Puntos acordados con Frontend (dashboard v1)
 
-1. **Nombres y geometría de municipios.** Gold no los incluye (sí `id_municipio`). Hay que decidir de dónde salen (catálogo INE/CNIG, GeoJSON en el repositorio) para el mapa y el buscador por nombre.
-2. **Ubicación de los ficheros de evaluación** (`informe_final.csv`, `informe_walkforward.csv`): se proponen en `docs/resultados/`. Su esquema y cómo leerlos están en la sección 11.
-3. **Ubicación de la importancia global** (`shap_global.csv` / `.html`).
-4. **Política de niveles y prioridad relativa** (DEC-49), que decide si hay que mostrar `prioridad_dia`.
-5. **Aviso de episodio de riesgo generalizado:** umbral del 90 % y redacción.
+1. **Nombres y geometría de municipios:** `src/dashboard/assets/municipios_galicia.geojson`, versionado y generado desde los recintos del CNIG con `scripts/generar_mapa_municipios.py` (313 municipios).
+2. **Ficheros de evaluación:** `docs/resultados/informe_final.csv` e `informe_walkforward.csv` (esquema en la sección 11).
+3. **Importancia global:** `docs/resultados/shap_global.csv` y `shap_global_grupos.csv`, que genera `inferir --ejemplo-dir docs/resultados`.
+4. **Prioridad relativa:** se muestra como «Prioridad relativa hoy: top N %», calculada por fecha y por versión de modelo. Sigue siendo provisional hasta confirmar DEC-49.
+5. **Aviso de episodio de riesgo generalizado:** con al menos el 90 % de los municipios con predicción en «medio» o «alto»; mensaje informativo, no error.
+
+**Publicación:** `python -m src.ml.hf_hub` o `run_pipeline.py --etapas ml --subir-hf` suben ambos ficheros a `data/gold/` del dataset de Hugging Face en un único commit, tras comprobar que son coherentes (DEC-52). Pendiente de probar con el dataset real.
 
 ---
 

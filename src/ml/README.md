@@ -23,6 +23,7 @@ El modelo con FWI (`con_fwi`) **mejora al FWI** en los tres escenarios de test (
 | `walkforward.py` | Validación walk-forward: repite la comparación con el FWI en varios años. Con `--guardar-predicciones` guarda las probabilidades y los umbrales de cada pliegue |
 | `inferir.py` | Inferencia batch con el modelo guardado: dominio del modelo, modelo de respaldo, predicciones, explicaciones SHAP, avisos de calidad y figuras de ejemplo |
 | `verificar_salidas.py` | Comprueba `predicciones.parquet` y `explicaciones.parquet` (unicidad, cobertura, niveles frente a umbrales, reconstrucción de la probabilidad con SHAP) |
+| `hf_hub.py` | Publica `predicciones.parquet` y `explicaciones.parquet` en el dataset de Hugging Face en un único commit, tras comprobar que son coherentes (DEC-52) |
 
 ## Contrato de entrada (tabla de entrenamiento de Gold)
 
@@ -127,6 +128,7 @@ python src/ml/verificar_salidas.py --pred data/gold/predicciones.parquet --expl 
 - **Una predicción vigente por municipio y fecha:** al escribir, las nuevas sustituyen a las existentes del mismo municipio y `fecha_objetivo` (aunque tengan otra versión) y a sus explicaciones; así, cuando llega el FWI, `v1` reemplaza a `v1-respaldo`. La escritura es atómica. `--reemplazar` descarta todo lo anterior.
 - **Avisos** por stderr: cobertura baja (`--min-cobertura`), fechas con casi todos los municipios en «medio» o «alto» (`--aviso-alarmas`), muchos nulos meteorológicos en el último día y retraso respecto a hoy (`--max-retraso`).
 - **Figuras de ejemplo** (`--ejemplo-dir`): se generan después de escribir las salidas; si fallan, el código de salida es 2 pero las predicciones ya están escritas.
+- **Publicación en Hugging Face (DEC-52):** `python -m src.ml.hf_hub` (o `run_pipeline.py --etapas ml --subir-hf`, que publica tras inferir y verificar) sube las predicciones y las explicaciones a `data/gold/` del dataset, de donde las descarga el dashboard. Necesita un token con permiso de escritura; `--dry-run` comprueba sin subir.
 
 ### Análisis auxiliares
 
@@ -191,7 +193,7 @@ Al escribir, las predicciones nuevas sustituyen a las existentes del mismo munic
 
 ## Decisiones
 
-Registradas en [docs/decisiones.md](../../docs/decisiones.md), DEC-37 a DEC-51 (contrato de entrada, variantes, entrenamiento, comparación con el baseline, niveles de riesgo, inferencia, SHAP, persistencia de modelos, municipios reservados, dataset de Gold, configuración del modelo, inferencia real con modelo de respaldo, niveles de riesgo, SHAP ampliado e integración en el orquestador).
+Registradas en [docs/decisiones.md](../../docs/decisiones.md), DEC-37 a DEC-52 (contrato de entrada, variantes, entrenamiento, comparación con el baseline, niveles de riesgo, inferencia, SHAP, persistencia de modelos, municipios reservados, dataset de Gold, configuración del modelo, inferencia real con modelo de respaldo, niveles de riesgo, SHAP ampliado, integración en el orquestador y publicación en Hugging Face).
 
 ## Limitaciones y pendientes
 

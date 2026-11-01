@@ -154,6 +154,7 @@ python run_pipeline.py --etapas gold ml --ml-acciones entrenar inferir --version
 - `--desde` y `--hasta` delimitan la ingesta y Silver (solo son obligatorios para esas etapas). **Gold y ML trabajan sobre todo el histórico disponible**, y la inferencia predice el último día disponible salvo que se indique `--inferir-desde` y `--inferir-hasta`.
 - El entrenamiento usa la configuración de DEC-47 (XGBoost, desde 2009, sin `viento`, `scale_pos_weight=1`, variantes `con_fwi` y `sin_fwi`) en la **fase de desarrollo**, que no toca el test. Se niega a sobrescribir una versión de modelo existente salvo con `--sobrescribir-modelo`.
 - Las predicciones de los días sin FWI se hacen con el modelo de respaldo (`version_modelo = v1-respaldo`); detalle en [src/ml/README.md](src/ml/README.md).
+- Con `--subir-hf`, tras inferir y verificar se publican las predicciones y las explicaciones en el dataset de Hugging Face (`data/gold/`), de donde las descarga el dashboard. Hace falta un token con permiso de escritura; `python -m src.ml.hf_hub --dry-run` comprueba sin subir.
 - Si falla Silver, Gold o ML, el pipeline se detiene; `--continuar` lo evita. La ingesta no detiene el pipeline si falla una fuente, pero el código de salida es 1.
 - Los modelos (`models/`) y los datos de `data/` no se suben al repositorio.
 
