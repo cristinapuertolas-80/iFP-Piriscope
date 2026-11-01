@@ -22,7 +22,7 @@ El modelo con FWI (`con_fwi`) **mejora al FWI** en los tres escenarios de test (
 | `experimento.py` | Entrena las variantes, compara con el FWI y escribe el informe (fases de desarrollo y final) |
 | `walkforward.py` | Validación walk-forward: repite la comparación con el FWI en varios años. Con `--guardar-predicciones` guarda las probabilidades y los umbrales de cada pliegue |
 | `inferir.py` | Inferencia batch con el modelo guardado: dominio del modelo, modelo de respaldo, predicciones, explicaciones SHAP, avisos de calidad y figuras de ejemplo |
-| `modelos_hf.py` | Descarga de Hugging Face los modelos versionados (`models/<versión>_*`: `.joblib`, `.json` y `_umbrales.json`) a `models/`. `python -m src.ml.modelos_hf [--version v1]` o `run_pipeline.py --etapas ml --descargar-modelos` (DEC-53) |
+| `modelos_hf.py` | Descarga y subida de Hugging Face los modelos versionados (`models/<versión>_*`: `.joblib`, `.json` y `_umbrales.json`) a `models/`. Descarga: `python -m src.ml.modelos_hf [--version v1]` o `run_pipeline.py --etapas ml --descargar-modelos` (DEC-53); Subida: `python -m src.ml.modelos_hf --subir --version v1 [--dry_run]`|
 | `hf_hub.py` | Publica `predicciones.parquet` y `explicaciones.parquet` en el dataset de Hugging Face en un único commit, tras comprobar que son coherentes (DEC-52) |
 | [`scripts/verificar_salidas.py`](../../scripts/verificar_salidas.py) | Comprueba `predicciones.parquet` y `explicaciones.parquet` (unicidad, cobertura, niveles frente a umbrales, reconstrucción de la probabilidad con SHAP). `run_pipeline.py --etapas ml` lo ejecuta tras la inferencia |
 
