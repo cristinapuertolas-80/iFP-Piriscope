@@ -218,6 +218,7 @@ Estado a la entrega de NF3. El detalle de cada punto está en [docs/decisiones.m
 - **Fuentes con paso manual**: las exportaciones de EGIF y los recintos del CNIG se dejan en `data/landing/`; la ingesta de AEMET y del FWI necesita sus claves.
 - **Pendiente de verificar con datos reales**: el reentrenamiento reproducible (`--ml-acciones entrenar`), comparar el FWI intermedio con el consolidado y contrastar las etiquetas de 2022-2023 con las estadísticas definitivas de EGIF.
 - **El dataset de Hugging Face es de acceso restringido**: reproducir requiere una cuenta con acceso aceptado.
+- **Detalles de interfaz**: en la tabla del día, las celdas sin valor (FWI de las estimaciones sin FWI, municipios sin dato) aparecen como «None», que es como `st.dataframe` pinta los nulos; y en la explicación SHAP el título del eje horizontal se corta en algunos anchos de pantalla.
 
 ---
 
