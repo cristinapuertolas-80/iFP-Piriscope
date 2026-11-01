@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 import run_pipeline as rp
-from src.ml import config, experimento, inferir
+from src.ml import config, experimento, hf_hub, inferir
 
 
 @pytest.fixture
@@ -86,7 +86,7 @@ def test_gold_falla_si_el_subproceso_falla(monkeypatch):
 def ml(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "MODELS_DIR", tmp_path)
     monkeypatch.setattr(config, "GOLD_DIR", tmp_path)
-    reg = {"entrenar": [], "inferir": [], "verificar": []}
+    reg = {"entrenar": [], "inferir": [], "verificar": [], "subidas": [], "verificacion_ok": True}
 
     def guardar_modelos(version):
         for variante in ("con_fwi", "sin_fwi"):
@@ -103,7 +103,8 @@ def ml(monkeypatch, tmp_path):
     reg["codigo_inferir"] = 0
     monkeypatch.setattr(experimento, "main", entrenar)
     monkeypatch.setattr(inferir, "main", lambda argv: reg["inferir"].append(argv) or reg["codigo_inferir"])
-    monkeypatch.setattr(rp, "verificar_salidas", lambda *a: reg["verificar"].append(a) or True)
+    monkeypatch.setattr(rp, "verificar_salidas", lambda *a: reg["verificar"].append(a) or reg["verificacion_ok"])
+    monkeypatch.setattr(hf_hub, "subir_gold", lambda **k: reg["subidas"].append(k) or "https://hf.co/commit/x")
     return reg
 
 
@@ -180,6 +181,52 @@ def test_la_verificacion_se_puede_omitir(ml):
     assert rp.main(["--etapas", "ml", "--sin-verificar"]) == 0 and len(ml["verificar"]) == 1
 
 
+# --- publicación de Gold (DEC-52) ------------------------------------------------------------------
+def test_subir_hf_publica_gold_despues_de_verificar(ml):
+    ml["guardar_modelos"]("v1")
+    assert rp.main(["--etapas", "ml", "--subir-hf"]) == 0
+    assert len(ml["verificar"]) == 1 and len(ml["subidas"]) == 1
+
+
+def test_sin_subir_hf_no_se_publica(ml):
+    ml["guardar_modelos"]("v1")
+    assert rp.main(["--etapas", "ml"]) == 0
+    assert ml["subidas"] == []
+
+
+def test_no_se_publica_si_falla_la_verificacion(ml):
+    ml["guardar_modelos"]("v1")
+    ml["verificacion_ok"] = False
+    assert rp.main(["--etapas", "ml", "--subir-hf"]) == 1
+    assert ml["subidas"] == []
+
+
+def test_no_se_publica_si_falla_la_inferencia(ml):
+    ml["guardar_modelos"]("v1")
+    ml["codigo_inferir"] = 2
+    assert rp.main(["--etapas", "ml", "--subir-hf"]) == 1
+    assert ml["subidas"] == []
+
+
+def test_no_se_publica_si_solo_se_entrena(ml):
+    assert rp.main(["--etapas", "ml", "--ml-acciones", "entrenar", "--version-modelo", "v2", "--subir-hf"]) == 0
+    assert ml["subidas"] == []
+
+
+def test_un_fallo_de_la_subida_hace_fallar_la_etapa(ml, monkeypatch):
+    ml["guardar_modelos"]("v1")
+
+    def falla(**k):
+        raise RuntimeError("acceso denegado")
+
+    monkeypatch.setattr(hf_hub, "subir_gold", falla)
+    assert rp.main(["--etapas", "ml", "--subir-hf"]) == 1
+
+
+def test_con_sin_verificar_se_puede_publicar(ml):
+    ml["guardar_modelos"]("v1")
+    assert rp.main(["--etapas", "ml", "--subir-hf", "--sin-verificar"]) == 0
+    assert ml["verificar"] == [] and len(ml["subidas"]) == 1
 def test_el_script_de_verificacion_existe():
     # Se movió de src/ml/ a scripts/: si la ruta no existe, la verificación nunca llega a ejecutarse
     assert rp.SCRIPT_VERIFICAR.is_file()
