@@ -148,15 +148,31 @@ jobs:
           print(f"\nGold regenerada: {len(p):,} predicciones · última fecha_objetivo {u:%Y-%m-%d}")
           print("niveles en la última fecha:", p[p["fecha_objetivo"] == u]["nivel_riesgo"].value_counts().to_dict(),
                 "· versiones:", p[p["fecha_objetivo"] == u]["version_modelo"].value_counts().to_dict())
+
+          # ¿Por qué difieren las predicciones comunes? Se comparan los valores de entrada guardados en las explicaciones
+          ref = pd.read_parquet("publicado/predicciones.parquet", columns=["id_prediccion", "probabilidad"])
+          m = ref.merge(p[["id_prediccion", "probabilidad"]], on="id_prediccion", suffixes=("_ref", "_nuevo"))
+          dif = m[(m["probabilidad_ref"] - m["probabilidad_nuevo"]).abs() > 1e-6]["id_prediccion"]
+          print(f"\nPredicciones comunes con diferencia > 1e-6: {len(dif)}")
+          if len(dif):
+              cols = ["id_prediccion", "variable", "valor_variable"]
+              e_ref = pd.read_parquet("publicado/explicaciones.parquet", columns=cols)
+              e_new = pd.read_parquet("data/gold/explicaciones.parquet", columns=cols)
+              e_ref, e_new = e_ref[e_ref["id_prediccion"].isin(dif)], e_new[e_new["id_prediccion"].isin(dif)]
+              x = e_ref.merge(e_new, on=["id_prediccion", "variable"], how="outer", suffixes=("_ref", "_nuevo"))
+              a, b = x["valor_variable_ref"], x["valor_variable_nuevo"]
+              x["distinto"] = a.isna().ne(b.isna()) | (a - b).abs().gt(1e-9)
+              cambia = x.groupby("id_prediccion")["distinto"].any()
+              print(f"  de ellas, con algún valor de entrada (top-5 SHAP) distinto o con otras variables en el top-5: "
+                    f"{int(cambia.sum())} de {len(cambia)}")
+              print("  fechas afectadas:", sorted({i.split('_')[1] for i in dif}))
           PY
 
-      - name: Arrancar el dashboard sobre la Gold regenerada y comprobar que responde
-        env:
-          PIRISCOPE_DASHBOARD_ORIGEN: local
+      - name: Arrancar el dashboard sobre la Gold regenerada (run_dashboard.py --local) y comprobar que responde
         run: |
-          nohup streamlit run src/dashboard/app.py --server.headless true --server.port 8501 \
-            --browser.gatherUsageStats false > "$EV/08_streamlit.log" 2>&1 &
-          for i in $(seq 1 60); do curl -fsS http://localhost:8501/_stcore/health >/dev/null 2>&1 && break; sleep 2; done
+          # Igual que en local: el lanzador crea .venv, instala requirements-dashboard.txt y arranca Streamlit
+          nohup python run_dashboard.py --local --sin-navegador --puerto 8501 > "$EV/08_dashboard.log" 2>&1 &
+          for i in $(seq 1 150); do curl -fsS http://localhost:8501/_stcore/health >/dev/null 2>&1 && break; sleep 2; done
           { date -u +"%Y-%m-%dT%H:%M:%SZ"; echo "GET /_stcore/health -> $(curl -fsS http://localhost:8501/_stcore/health)";
             curl -sS -o /dev/null -w "GET / -> HTTP %{http_code}\n" http://localhost:8501/; } | tee "$EV/08_health.txt"
 

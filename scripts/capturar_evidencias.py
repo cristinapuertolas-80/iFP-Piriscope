@@ -49,6 +49,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--fecha", default=None, help="AAAA-MM-DD para la vista de la ficha")
     ap.add_argument("--municipio", default=None, help="código INE para la vista de la ficha")
     ap.add_argument("--ancho", type=int, default=1440)
+    ap.add_argument("--alto", type=int, default=2600,
+                    help="alto de la ventana: Streamlit desplaza un contenedor interno, así que la captura es la ventana")
     a = ap.parse_args(argv)
 
     from playwright.sync_api import sync_playwright
@@ -56,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
     a.salida.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as pw:
         navegador = pw.chromium.launch()
-        page = navegador.new_page(viewport={"width": a.ancho, "height": 1000}, locale="es-ES")
+        page = navegador.new_page(viewport={"width": a.ancho, "height": a.alto}, locale="es-ES")
 
         print("Vista inicial (última fecha con predicción)")
         page.goto(a.url, wait_until="networkidle")

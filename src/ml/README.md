@@ -22,6 +22,7 @@ El modelo con FWI (`con_fwi`) **mejora al FWI** en los tres escenarios de test (
 | `experimento.py` | Entrena las variantes, compara con el FWI y escribe el informe (fases de desarrollo y final) |
 | `walkforward.py` | Validación walk-forward: repite la comparación con el FWI en varios años. Con `--guardar-predicciones` guarda las probabilidades y los umbrales de cada pliegue |
 | `inferir.py` | Inferencia batch con el modelo guardado: dominio del modelo, modelo de respaldo, predicciones, explicaciones SHAP, avisos de calidad y figuras de ejemplo |
+| `modelos_hf.py` | Descarga de Hugging Face los modelos versionados (`models/<versión>_*`: `.joblib`, `.json` y `_umbrales.json`) a `models/`. `python -m src.ml.modelos_hf [--version v1]` o `run_pipeline.py --etapas ml --descargar-modelos` (DEC-53) |
 | [`scripts/verificar_salidas.py`](../../scripts/verificar_salidas.py) | Comprueba `predicciones.parquet` y `explicaciones.parquet` (unicidad, cobertura, niveles frente a umbrales, reconstrucción de la probabilidad con SHAP). `run_pipeline.py --etapas ml` lo ejecuta tras la inferencia |
 
 ## Contrato de entrada (tabla de entrenamiento de Gold)
@@ -203,7 +204,7 @@ Registradas en [docs/decisiones.md](../../docs/decisiones.md), DEC-37 a DEC-51 (
 - **Probabilidad sin calibrar:** sobrestima entre 1,5 y 2,4 veces según el año y una calibración fijada en un año no se mantiene; se presenta como índice de riesgo.
 - **Niveles de riesgo:** política pendiente de confirmar (DEC-49). Los umbrales son provisionales y el Recall objetivo no se reproduce con exactitud de un año a otro.
 - **Etiquetas de 2022 y 2023:** pendiente contrastar con las estadísticas oficiales de EGIF que sean definitivas (DEC-31).
-- Los `.joblib` son pickles: solo cargar ficheros generados por el propio proyecto, y no se suben al repositorio. Pendiente subir los modelos finales a Hugging Face (DEC-44).
+- Los `.joblib` son pickles: solo cargar ficheros generados por el propio proyecto, y no se suben al repositorio. Los modelos `v1` están en `models/` del dataset de Hugging Face y se descargan con `modelos_hf.py` (DEC-44, DEC-53); el repositorio no tiene comando para subirlos.
 
 ## Tests
 
