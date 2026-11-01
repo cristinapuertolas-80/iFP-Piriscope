@@ -62,6 +62,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 | [DEC-50](#dec-50-explicaciones-shap-ampliadas-valor-de-la-variable-valor-base-y-resto) | Explicaciones SHAP ampliadas | Explicabilidad | Aceptada |
 | [DEC-51](#dec-51-integración-de-ml-en-el-orquestador-hu-11) | Integración de ML en el orquestador | Arquitectura | Aceptada |
 | [DEC-52](#dec-52-dashboard-origen-de-los-datos-catálogo-de-municipios-y-presentación) | Dashboard: origen de los datos, catálogo de municipios y presentación | Arquitectura / UX | Aceptada |
+| [DEC-53](#dec-53-publicación-de-las-predicciones-de-gold-en-hugging-face) | Publicación de las predicciones de Gold en Hugging Face | Arquitectura | Aceptada |
 
 ---
 
@@ -675,6 +676,20 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
   - El fondo del mapa (teselas de CARTO/OpenStreetMap) necesita conexión a internet; los municipios se pintan igualmente.
   - Si el equipo descarta DEC-49, la prioridad relativa se retira del dashboard sin cambiar Gold.
   - Nueva dependencia: `streamlit`, y `plotly>=5.24` por los mapas MapLibre. `tests/test_dashboard.py` (9 tests) cubre la preparación de los datos, los casos límite, el origen de los datos y un smoke test de la app con datos de juguete.
+
+### DEC-53. Publicación de las predicciones de Gold en Hugging Face
+
+- **Fecha:** 2026-10-31 · **Estado:** Aceptada (pendiente de probar con el dataset real)
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/hf-gold-upload
+- **Contexto:** el dashboard descarga `predicciones.parquet` y `explicaciones.parquet` de `data/gold/` del dataset de Hugging Face, pero `--subir-hf` solo subía la ingesta y Silver (DEC-51): publicarlos dependía de hacerlo a mano.
+- **Decisión:**
+  - `src/ml/hf_hub.py` (`subir_gold` y `python -m src.ml.hf_hub`) sube los dos ficheros a `data/gold/` **en un único commit**, para que nunca quede publicado un par incoherente.
+  - Antes de subir comprueba que los ficheros existen y no están vacíos, que tienen las columnas del contrato, que hay una predicción por municipio y fecha y que ambos ficheros tienen las mismas `id_prediccion`. Si algo falla, no sube nada. Avisa si faltan las columnas de DEC-50 (el dashboard las tolera).
+  - `run_pipeline.py --etapas ml --subir-hf` publica **después de inferir y verificar**. No publica si falla la inferencia, la verificación o la subida de la etapa, ni cuando solo se entrena. Con `--sin-verificar` publica tras las comprobaciones propias del módulo.
+  - `python -m src.ml.hf_hub --dry-run` comprueba y muestra qué subiría, sin subir nada. La subida necesita un token con **permiso de escritura** (`HF_TOKEN`).
+  - No sube modelos (DEC-44) ni los datasets de entrenamiento.
+- **Alternativas descartadas:** subir los ficheros uno a uno (el dashboard podría leer un par incoherente entre las dos subidas); subir sin comprobar (publicaría datos que el verificador habría rechazado); dejar la subida manual.
+- **Consecuencias:** cada subida reemplaza los dos ficheros completos (no es incremental); el dashboard los recoge al pulsar «Comprobar si hay datos nuevos»; un token de solo lectura no basta; `tests/test_hf_gold.py` (10 tests) y los de `test_run_pipeline_ml.py` cubren la lógica con un cliente simulado, no la subida real.
 
 ---
 
