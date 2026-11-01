@@ -1,0 +1,204 @@
+# Evidencias de funcionamiento (entrega NF3): levanta el producto DESDE CERO en una máquina limpia,
+# con los datos reales del dataset de Hugging Face, y guarda las pruebas.
+#
+#   1. Entorno fijado (environment/requirements-lock.txt) y tests (informe JUnit).
+#   2. Bronze -> Silver: descarga los originales archivados por la ingesta (raw/) y regenera Silver.
+#   3. Silver -> Gold: variables derivadas y datasets municipio-día (run_pipeline.py --etapas gold).
+#   4. Gold -> ML: baja el modelo v1 versionado, predice los últimos días y verifica las salidas.
+#   5. Reproducibilidad: compara las predicciones regeneradas con las publicadas.
+#   6. Dashboard: lo arranca sobre la Gold regenerada, comprueba que responde y captura cada vista.
+#
+# Las evidencias se suben como artefacto y a la rama `evidencias/nf3` (commit [skip ci]).
+# Secret necesario: HF_TOKEN (lectura sobre el dataset; el de la ingesta sirve).
+
+name: Evidencias NF3
+
+on:
+  workflow_dispatch:
+    inputs:
+      inferir_desde:
+        description: "Primer día D a predecir de nuevo (AAAA-MM-DD)"
+        required: false
+        default: "2026-10-01"
+  push:
+    branches: ["nf3/**"]
+
+permissions:
+  contents: write   # solo para publicar las evidencias en la rama evidencias/nf3
+
+env:
+  HF_REPO_ID: ${{ vars.HF_REPO_ID || 'cpuertolas/piriscope' }}
+  PYTHONUNBUFFERED: "1"
+  INFERIR_DESDE: ${{ inputs.inferir_desde || '2026-10-01' }}
+  EV: evidencias
+
+jobs:
+  evidencias:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: environment/requirements*.txt
+
+      - name: Instalar el entorno fijado
+        run: |
+          pip install -r environment/requirements-lock.txt
+          mkdir -p "$EV"
+          { echo "commit: $GITHUB_SHA"; echo "run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID";
+            date -u +"inicio: %Y-%m-%dT%H:%M:%SZ"; python --version; uname -srm; pip freeze; } > "$EV/00_entorno.txt"
+
+      - name: Tests
+        run: |
+          set -o pipefail
+          pytest -o addopts="" -rs --junitxml="$EV/01_pytest.xml" 2>&1 | tee "$EV/01_pytest.txt"
+
+      - name: Contenido del dataset de Hugging Face
+        run: |
+          python - <<'PY' | tee "$EV/02_dataset_hf.txt"
+          import os, collections
+          from huggingface_hub import HfApi
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          repo = os.environ["HF_REPO_ID"]
+          info = api.dataset_info(repo, files_metadata=True)
+          print(f"Dataset: {repo} · revisión {info.sha} · última modificación {info.last_modified}")
+          por_carpeta = collections.defaultdict(lambda: [0, 0])
+          for s in info.siblings:
+              partes = s.rfilename.split("/")
+              clave = "/".join(partes[:2]) if partes[0] in ("raw", "data") else partes[0]
+              por_carpeta[clave][0] += 1
+              por_carpeta[clave][1] += s.size or 0
+          for k in sorted(por_carpeta):
+              n, b = por_carpeta[k]
+              print(f"{k:<28} {n:>6} ficheros {b / 1e6:>10.1f} MB")
+          print()
+          for s in sorted(info.siblings, key=lambda s: s.rfilename):
+              if s.rfilename.startswith(("data/gold/", "models/")):
+                  print(f"{s.rfilename:<70} {(s.size or 0) / 1e6:>10.2f} MB")
+          ultimos = {}
+          for s in info.siblings:
+              p = s.rfilename.split("/")
+              if p[0] == "raw" and len(p) > 2:
+                  ultimos[p[1]] = max(ultimos.get(p[1], ""), p[2])
+          print("\nÚltima ingesta archivada por fuente (raw/<FUENTE>/<timestamp>):")
+          for f, t in sorted(ultimos.items()):
+              print(f"  {f:<10} {t}")
+          PY
+
+      - name: Guardar la Gold publicada (referencia para comparar)
+        run: |
+          python - <<'PY' | tee "$EV/03_gold_publicado.txt"
+          import shutil
+          from pathlib import Path
+          import pandas as pd
+          from src.dashboard import datos
+          dest = Path("publicado"); dest.mkdir(exist_ok=True)
+          for nombre, ruta in datos.descargar_gold_hf().items():
+              shutil.copy(ruta, dest / nombre)
+          p = pd.read_parquet(dest / "predicciones.parquet")
+          p["fecha_objetivo"] = pd.to_datetime(p["fecha_objetivo"])
+          print(f"predicciones.parquet publicado: {len(p):,} filas · {p['id_municipio'].nunique()} municipios · "
+                f"{p['fecha_objetivo'].min():%Y-%m-%d} a {p['fecha_objetivo'].max():%Y-%m-%d}")
+          print("versiones:", p["version_modelo"].value_counts().to_dict())
+          print("fecha_insert más reciente:", p["fecha_insert"].max())
+          PY
+
+      - name: "Bronze -> Silver (originales de Hugging Face)"
+        run: |
+          set -o pipefail
+          /usr/bin/time -f "duración: %E · memoria máx: %M KB" python -m src.silver --descargar-hf 2>&1 \
+            | tee "$EV/04_silver.log"
+          python - <<'PY' | tee -a "$EV/04_silver.log"
+          import json, pathlib
+          v = json.loads(pathlib.Path("data/silver/informes/validacion.json").read_text(encoding="utf-8"))
+          print("\nvalidacion.json:", {k: v[k] for k in v if not isinstance(v[k], list)})
+          PY
+
+      - name: "Silver -> Gold"
+        run: |
+          set -o pipefail
+          /usr/bin/time -f "duración: %E · memoria máx: %M KB" python run_pipeline.py --etapas gold 2>&1 \
+            | tee "$EV/05_gold.log"
+          cp data/gold/gold_informe.json "$EV/05_gold_informe.json" 2>/dev/null || true
+
+      - name: "Gold -> ML: modelo v1 de Hugging Face, inferencia D+1, SHAP y verificación"
+        run: |
+          set -o pipefail
+          cp publicado/*.parquet data/gold/      # se actualizan sobre las publicadas, como en producción
+          /usr/bin/time -f "duración: %E · memoria máx: %M KB" python run_pipeline.py --etapas ml \
+            --descargar-modelos --inferir-desde "$INFERIR_DESDE" --ejemplo-dir "$EV/shap" 2>&1 | tee "$EV/06_ml.log"
+          ls -la models | tee -a "$EV/06_ml.log"
+
+      - name: Reproducibilidad de las predicciones
+        run: |
+          python scripts/comparar_predicciones.py --referencia publicado/predicciones.parquet \
+            --nuevo data/gold/predicciones.parquet --desde "$INFERIR_DESDE" 2>&1 | tee "$EV/07_reproducibilidad.txt" \
+            || echo "(hay diferencias: ver arriba)" | tee -a "$EV/07_reproducibilidad.txt"
+          python - <<'PY' | tee -a "$EV/07_reproducibilidad.txt"
+          import pandas as pd
+          p = pd.read_parquet("data/gold/predicciones.parquet")
+          p["fecha_objetivo"] = pd.to_datetime(p["fecha_objetivo"])
+          u = p["fecha_objetivo"].max()
+          print(f"\nGold regenerada: {len(p):,} predicciones · última fecha_objetivo {u:%Y-%m-%d}")
+          print("niveles en la última fecha:", p[p["fecha_objetivo"] == u]["nivel_riesgo"].value_counts().to_dict(),
+                "· versiones:", p[p["fecha_objetivo"] == u]["version_modelo"].value_counts().to_dict())
+
+          # ¿Por qué difieren las predicciones comunes? Se comparan los valores de entrada guardados en las explicaciones
+          ref = pd.read_parquet("publicado/predicciones.parquet", columns=["id_prediccion", "probabilidad"])
+          m = ref.merge(p[["id_prediccion", "probabilidad"]], on="id_prediccion", suffixes=("_ref", "_nuevo"))
+          dif = m[(m["probabilidad_ref"] - m["probabilidad_nuevo"]).abs() > 1e-6]["id_prediccion"]
+          print(f"\nPredicciones comunes con diferencia > 1e-6: {len(dif)}")
+          if len(dif):
+              cols = ["id_prediccion", "variable", "valor_variable"]
+              e_ref = pd.read_parquet("publicado/explicaciones.parquet", columns=cols)
+              e_new = pd.read_parquet("data/gold/explicaciones.parquet", columns=cols)
+              e_ref, e_new = e_ref[e_ref["id_prediccion"].isin(dif)], e_new[e_new["id_prediccion"].isin(dif)]
+              x = e_ref.merge(e_new, on=["id_prediccion", "variable"], how="outer", suffixes=("_ref", "_nuevo"))
+              a, b = x["valor_variable_ref"], x["valor_variable_nuevo"]
+              x["distinto"] = a.isna().ne(b.isna()) | (a - b).abs().gt(1e-9)
+              cambia = x.groupby("id_prediccion")["distinto"].any()
+              print(f"  de ellas, con algún valor de entrada (top-5 SHAP) distinto o con otras variables en el top-5: "
+                    f"{int(cambia.sum())} de {len(cambia)}")
+              print("  fechas afectadas:", sorted({i.split('_')[1] for i in dif}))
+          PY
+
+      - name: Arrancar el dashboard sobre la Gold regenerada (run_dashboard.py --local) y comprobar que responde
+        run: |
+          # Igual que en local: el lanzador crea .venv, instala requirements-dashboard.txt y arranca Streamlit
+          nohup python run_dashboard.py --local --sin-navegador --puerto 8501 > "$EV/08_dashboard.log" 2>&1 &
+          for i in $(seq 1 150); do curl -fsS http://localhost:8501/_stcore/health >/dev/null 2>&1 && break; sleep 2; done
+          { date -u +"%Y-%m-%dT%H:%M:%SZ"; echo "GET /_stcore/health -> $(curl -fsS http://localhost:8501/_stcore/health)";
+            curl -sS -o /dev/null -w "GET / -> HTTP %{http_code}\n" http://localhost:8501/; } | tee "$EV/08_health.txt"
+
+      - name: Capturas del dashboard
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium > /dev/null
+          python scripts/capturar_evidencias.py --url http://localhost:8501 --salida "$EV/capturas" \
+            --fecha 2025-08-14 --municipio 32054 2>&1 | tee "$EV/09_capturas.txt"
+          date -u +"fin: %Y-%m-%dT%H:%M:%SZ" >> "$EV/00_entorno.txt"
+
+      - name: Guardar evidencias (artefacto)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidencias-nf3-${{ github.sha }}
+          path: evidencias/
+          retention-days: 90
+
+      - name: Publicar evidencias en la rama evidencias/nf3
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan evidencias-nf3-tmp
+          git rm -rf --cached . > /dev/null
+          git add -f "$EV"
+          git commit -q -m "Evidencias NF3 del commit ${GITHUB_SHA::7} (run $GITHUB_RUN_ID) [skip ci]"
+          git push -f origin HEAD:refs/heads/evidencias/nf3

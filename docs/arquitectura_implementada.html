@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 28px; font-family: Inter, "DejaVu Sans", sans-serif; color: #1d1d1f; background: #fff; width: 1500px; }
+  .fila { display: flex; gap: 18px; align-items: stretch; }
+  .caja { border: 1.5px solid #3a3a3a; border-radius: 8px; background: #fff; overflow: hidden; flex: 1; }
+  .cab { background: #E04B4B; color: #fff; font-weight: 700; font-size: 16px; text-align: center; padding: 7px 8px; border-bottom: 1.5px solid #3a3a3a; }
+  .cab.gris { background: #4a4f57; }
+  .cab.azul { background: #2f5d8a; }
+  .cuerpo { padding: 9px 12px; font-size: 13.5px; line-height: 1.42; text-align: center; }
+  .cuerpo.izq { text-align: left; }
+  code { font-family: "DejaVu Sans Mono", monospace; font-size: 12px; background: #f3f3f3; padding: 0 3px; border-radius: 3px; }
+  .flecha { text-align: center; font-size: 13px; color: #444; height: 30px; line-height: 30px; }
+  .flecha b { font-size: 20px; }
+  .nota { font-style: italic; color: #555; }
+  .grid { display: grid; grid-template-columns: 1fr 300px; gap: 18px; }
+  .lateral { display: flex; flex-direction: column; gap: 14px; }
+  .lateral .caja { flex: none; }
+  .sub { display:flex; gap: 10px; margin-top: 8px; }
+  .sub .caja { border-width: 1px; }
+  .sub .cuerpo { font-size: 12.5px; }
+  .tag { display:inline-block; font-size: 11px; border: 1px dashed #777; border-radius: 4px; padding: 0 5px; margin: 1px; }
+  h1 { font-size: 20px; margin: 0 0 14px; }
+</style></head><body>
+<h1>Piriscope · arquitectura implementada (entrega NF3)</h1>
+<div class="grid">
+<div>
+  <div class="fila">
+    <div class="caja"><div class="cab">AEMET OpenData</div><div class="cuerpo">API REST · meteorología diaria por estación<br><code>AEMET_API_KEY</code></div></div>
+    <div class="caja"><div class="cab">EGIF-MITECO</div><div class="cuerpo">Exportaciones Excel de partes de incendio<br><code>data/landing/egif/</code></div></div>
+    <div class="caja"><div class="cab">EFFIS / Copernicus</div><div class="cuerpo">FWI y componentes (NetCDF) vía EWDS<br><code>CDSAPI_KEY</code></div></div>
+    <div class="caja"><div class="cab">INE / CNIG</div><div class="cuerpo">Códigos de municipio + recintos municipales (GeoPackage)</div></div>
+  </div>
+  <div class="flecha"><b>↓</b> <code>src/ingest</code> · <code>python -m src.ingest &lt;fuente&gt;</code> · manifiesto, reintentos, caché</div>
+  <div class="caja"><div class="cab">CAPA BRONZE · data/bronze/&lt;fuente&gt;/&lt;timestamp&gt;/</div>
+    <div class="cuerpo">Originales sin modificar (JSON / Excel / NetCDF / GeoPackage) + <code>manifest.json</code> · se archivan en Hugging Face <code>raw/&lt;FUENTE&gt;/&lt;timestamp&gt;/</code></div></div>
+  <div class="flecha"><b>↓</b> <code>src/silver</code> · <code>python -m src.silver [--descargar-hf]</code></div>
+  <div class="caja"><div class="cab">CAPA SILVER · data/silver/*.parquet</div>
+    <div class="cuerpo"><code>municipio</code> · <code>estacion_aemet</code> · <code>observacion_meteorologica</code> · <code>indicador_fwi</code> · <code>evento_incendio</code><br>
+    Estación AEMET fija más cercana por municipio · INE por nombre + coordenadas UTM (tabla de equivalencias) · FWI por celda de tierra más cercana al centroide<br>
+    Informes de calidad y <code>validacion.json</code> (esquema, claves, rangos); si hay errores, el pipeline se detiene</div></div>
+  <div class="flecha"><b>↓</b> <code>src/features</code> · <code>python run_pipeline.py --etapas gold</code></div>
+  <div class="caja"><div class="cab">CAPA GOLD · data/gold/</div>
+    <div class="cuerpo"><code>dataset_municipio_dia.parquet</code> (todas las filas, también sin etiqueta) · <code>dataset_entrenamiento.parquet</code> (etiqueta <code>incendio_d1</code>, <code>particion</code>, <code>reservado</code>) · <code>gold_informe.json</code><br>
+    Derivadas solo con datos ≤ D: <code>racha_dias_secos</code>, <code>precip_acum_7d</code>, <code>mes</code></div></div>
+  <div class="flecha"><b>↓</b> Dataset &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <code>predicciones.parquet</code> · <code>explicaciones.parquet</code> <b>↑</b></div>
+  <div class="caja"><div class="cab">SERVICIOS DE MACHINE LEARNING · src/ml + src/explainability (batch) · <code style="background:none;color:#fff">run_pipeline.py --etapas ml</code></div>
+    <div class="sub">
+      <div class="caja"><div class="cuerpo"><b>Entrenamiento y evaluación (offline)</b><br><code>experimento.py</code> · <code>walkforward.py</code><br>XGBoost desde 2009, sin viento (DEC-47) · escenarios A/B/C frente al FWI · bootstrap por bloques</div></div>
+      <div class="caja"><div class="cuerpo"><b>Modelos versionados</b><br><code>models/v1_xgboost_con_fwi-…</code> (principal)<br><code>models/v1_xgboost_sin_fwi-…</code> (respaldo)<br>+ <code>.json</code> y <code>_umbrales.json</code> · en HF <code>models/</code> · <code>modelos_hf.py</code></div></div>
+      <div class="caja"><div class="cuerpo"><b>Inferencia D+1 + SHAP</b><br><code>inferir.py</code> → <code>predict.py</code>, <code>risk.py</code>, <code>shap_explain.py</code><br>Sin FWI → modelo de respaldo · top-5 SHAP<br><code>scripts/verificar_salidas.py</code></div></div>
+    </div></div>
+  <div class="flecha"><b>↓</b> Lectura de Gold (Hugging Face por defecto; <code>data/gold/</code> con <code>--local</code>) + <code>docs/resultados/*.csv</code></div>
+  <div class="caja"><div class="cab">DASHBOARD STREAMLIT · src/dashboard · <code style="background:none;color:#fff">python run_dashboard.py</code></div>
+    <div class="cuerpo">Mapa de los 313 municipios · buscador y ficha (nivel en texto, índice, FWI, prioridad relativa) · explicación SHAP · evolución del índice · tabla del día · modelo frente a FWI · cómo leerlo<br>
+    <span class="nota">Frontend y backend en el mismo proceso: el servidor de Streamlit sirve la interfaz y ejecuta la lógica de lectura; no entrena, no carga modelos y no accede a las fuentes.</span></div></div>
+</div>
+<div class="lateral">
+  <div class="caja"><div class="cab azul">Hugging Face · cpuertolas/piriscope</div>
+    <div class="cuerpo izq">Almacén de datos y modelos (acceso restringido, <code>HF_TOKEN</code>):<br>
+    <span class="tag">raw/AEMET</span><span class="tag">raw/EGIF</span><span class="tag">raw/EFFIS</span><span class="tag">raw/INE_CNIG</span><br>
+    <span class="tag">data/silver</span><span class="tag">data/gold</span><span class="tag">models</span><br>
+    Bronze → <code>raw/</code> automático (ingesta).<br>Silver → <code>--subir-hf</code>.<br>Gold y modelos: sin comando de subida en el repo.</div></div>
+  <div class="caja"><div class="cab gris">run_pipeline.py · orquestador</div>
+    <div class="cuerpo izq"><code>--etapas ingesta silver gold ml</code><br><code>--desde/--hasta</code> (ingesta, Silver)<br><code>--ml-acciones entrenar inferir</code><br><code>--descargar-modelos</code> · <code>--version-modelo</code><br>Se detiene si falla Silver, Gold o ML</div></div>
+  <div class="caja"><div class="cab gris">GitHub Actions</div>
+    <div class="cuerpo izq"><b>ingesta.yml</b> (cron): AEMET diario, FWI semanal → Bronze → HF <code>raw/</code><br>
+    <b>tests.yml</b>: pytest en cada PR y en <code>main</code> (lockfile)<br>
+    <b>evidencias.yml</b>: desde cero en máquina limpia: Silver → Gold → ML → dashboard + capturas</div></div>
+  <div class="caja"><div class="cab gris">Contratos entre módulos</div>
+    <div class="cuerpo izq">Solo ficheros: Parquet en <code>data/</code> y modelos en <code>models/</code>.<br>Anexo A (NF2) · <code>src/ml/config.py</code> · <code>docs/contrato_dashboard_gold.md</code></div></div>
+</div>
+</div>
+</body></html>

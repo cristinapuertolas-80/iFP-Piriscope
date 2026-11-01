@@ -178,3 +178,58 @@ def test_la_verificacion_se_puede_omitir(ml):
     ml["guardar_modelos"]("v1")
     assert rp.main(["--etapas", "ml"]) == 0 and len(ml["verificar"]) == 1
     assert rp.main(["--etapas", "ml", "--sin-verificar"]) == 0 and len(ml["verificar"]) == 1
+
+
+def test_el_script_de_verificacion_existe():
+    # Se movió de src/ml/ a scripts/: si la ruta no existe, la verificación nunca llega a ejecutarse
+    assert rp.SCRIPT_VERIFICAR.is_file()
+    assert rp.SCRIPT_VERIFICAR.parent.name == "scripts"
+
+
+def test_verificar_salidas_ejecuta_el_script_y_respeta_su_codigo(monkeypatch):
+    llamadas = []
+
+    def run(cmd, check=False):
+        llamadas.append(cmd)
+        return SimpleNamespace(returncode=resultado["codigo"])
+
+    resultado = {"codigo": 0}
+    monkeypatch.setattr(rp.subprocess, "run", run)
+    assert rp.verificar_salidas("v1_a_con_fwi", "v1_a_sin_fwi") is True
+    cmd = llamadas[0]
+    assert cmd[1] == str(rp.SCRIPT_VERIFICAR)
+    assert cmd[cmd.index("--modelo") + 1] == "v1_a_con_fwi" and cmd[cmd.index("--respaldo") + 1] == "v1_a_sin_fwi"
+    resultado["codigo"] = 1
+    assert rp.verificar_salidas("v1_a_con_fwi", "v1_a_sin_fwi") is False
+
+
+def test_sin_script_de_verificacion_la_etapa_falla(monkeypatch, tmp_path):
+    monkeypatch.setattr(rp, "SCRIPT_VERIFICAR", tmp_path / "no_existe.py")
+    monkeypatch.setattr(rp.subprocess, "run", lambda *a, **k: pytest.fail("no debe ejecutarse"))
+    assert rp.verificar_salidas("m", "r") is False
+
+
+def test_descargar_modelos_antes_de_inferir(ml, monkeypatch):
+    from src.ml import modelos_hf
+
+    pedidas = []
+
+    def descargar(version, destino):
+        pedidas.append((version, destino))
+        ml["guardar_modelos"](version)
+
+    monkeypatch.setattr(modelos_hf, "descargar_modelos", descargar)
+    assert rp.main(["--etapas", "ml", "--descargar-modelos"]) == 0
+    assert pedidas and pedidas[0][0] == "v1"
+    assert valor(ml["inferir"][0], "--modelo").startswith("v1_")
+
+
+def test_si_falla_la_descarga_de_modelos_no_se_infiere(ml, monkeypatch):
+    from src.ml import modelos_hf
+
+    def falla(*a, **k):
+        raise FileNotFoundError("sin modelos en el dataset")
+
+    monkeypatch.setattr(modelos_hf, "descargar_modelos", falla)
+    assert rp.main(["--etapas", "ml", "--descargar-modelos"]) == 1
+    assert ml["inferir"] == []

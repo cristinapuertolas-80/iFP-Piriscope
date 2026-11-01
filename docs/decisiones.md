@@ -678,6 +678,26 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 
 ---
 
+### DEC-53. Entrega NF3: reproducibilidad, modelos desde Hugging Face y evidencias en máquina limpia
+
+- **Fecha:** 2026-11-01 · **Estado:** Aceptada
+- **Responsable:** equipo (preparación de la entrega NF3) · **Issue/PR:** nf3/producto-reproducible
+- **Contexto:** NF3 exige un producto que funcione en local, un repositorio reproducible desde un tag o commit exacto (README, dependencias, variables de ejemplo, pruebas automatizadas y sus evidencias) y capturas del sistema funcionando. Al revisarlo aparecieron fallos: `run_pipeline.py` buscaba `src/ml/verificar_salidas.py`, que se había movido a `scripts/`, así que la etapa ML **omitía en silencio** la verificación de las salidas; `scripts/analisis_niveles.py` usaba imports relativos y no se podía ejecutar tras moverlo; el README daba 0,094 de AUC-PR en el escenario B (el informe dice 0,0935 → 0,093); y no había forma, desde el repositorio, de obtener los modelos `v1` ya publicados en `models/` del dataset, así que inferir exigía reentrenar.
+- **Decisión:**
+  - `run_pipeline.py` usa `scripts/verificar_salidas.py` y la etapa ML **falla** si el script no existe (antes devolvía éxito); se desactiva a propósito con `--sin-verificar`. Tests añadidos.
+  - `src/ml/modelos_hf.py` (`python -m src.ml.modelos_hf`) y `run_pipeline.py --descargar-modelos` bajan `models/<versión>_*` del dataset a `models/` (DEC-44). Solo se descargan modelos completos (`.joblib`, `.json` y `_umbrales.json`).
+  - `environment/requirements-lock.txt`: versiones exactas con las que pasan los tests (Python 3.12, generado con `uv pip compile --universal`). `tests.yml` lo instala y guarda el informe JUnit.
+  - `.github/workflows/evidencias.yml`: en una máquina limpia instala el lockfile, ejecuta los tests, regenera Silver desde los originales archivados (`raw/`), Gold, infiere con el modelo `v1` descargado y verifica las salidas, compara las predicciones regeneradas con las publicadas (`scripts/comparar_predicciones.py`), arranca el dashboard con `run_dashboard.py --local`, comprueba que responde y lo captura (`scripts/capturar_evidencias.py`). Las evidencias se publican en la rama `evidencias/nf3`.
+  - `tests/test_scripts.py`: todos los scripts de `scripts/` deben ejecutarse con `--help` desde cualquier carpeta.
+  - `docs/arquitectura_implementada.png` (fuente `.html`): diagrama de la arquitectura tal como está implementada.
+- **Alternativas descartadas:** versionar los modelos en GitHub (son pickles y DEC-44 los deja en Hugging Face); reentrenar en cada ejecución para poder inferir (cambiaría la versión evaluada y tarda más); capturas manuales del dashboard (no se pueden repetir ni ligar a un commit).
+- **Consecuencias:**
+  - Primera ejecución (commit `4030140`, run 41315927283): Silver se regenera en ~7 min (96 comprobaciones, 0 errores, 2 avisos); Gold en ~10 s (2.952.216 filas, 2001-01-01 a 2026-10-28); la inferencia desde 2026-10-01 llega a 2026-10-29 y pasa `verificar_salidas.py`. De las 6.235 predicciones comunes con las publicadas (fechas objetivo 2026-10-02 a 2026-10-22), las 5.947 `v1` coinciden (diferencia máxima 1,9·10⁻⁹) y solo 7 `v1-respaldo`, todas del 2026-10-22, difieren más de 10⁻⁶ (máximo 1,7·10⁻³, sin cambio de nivel): en las 7 cambian los valores de entrada guardados en las explicaciones, es decir, los datos de ese día se actualizaron después de publicar (AEMET publica con retraso y la ingesta vuelve a pedir los últimos 10 días). Con las mismas entradas, el pipeline reproduce las salidas.
+  - El workflow necesita el secret `HF_TOKEN` y permiso de escritura de contenidos solo para la rama de evidencias.
+  - El reentrenamiento (`--ml-acciones entrenar`) sigue sin verificarse con datos reales (pendiente de DEC-51).
+
+---
+
 ## Decisiones pendientes
 
 Se cerrarán durante la adquisición y el EDA y se registrarán como nuevas entradas o actualizando las existentes:
@@ -702,7 +722,7 @@ Se cerrarán durante la adquisición y el EDA y se registrarán como nuevas entr
 - [x] Dashboard: mostrar `v1-respaldo` como «estimación sin FWI» y las ausencias como «sin dato» (DEC-48) → DEC-52.
 - [ ] Reducir los días de respaldo: valorar una fuente de FWI más reciente (el retraso actual es de 2 a 3 días) (DEC-48).
 - [ ] Valorar umbrales o niveles alternativos: con el Recall del 80 %, en agosto el 82 % de los municipio-días entra en «medio o superior» (DEC-41). Por mes queda descartado por falta de positivos; cierre en DEC-49.
-- [ ] Subir los modelos finales a Hugging Face y enlazarlos (DEC-44).
+- [x] Subir los modelos finales a Hugging Face y enlazarlos (DEC-44): están en `models/` del dataset y se descargan con `python -m src.ml.modelos_hf` o `run_pipeline.py --descargar-modelos` (DEC-53).
 - [ ] Contrastar con las estadísticas oficiales si las etiquetas de 2022 y 2023 son definitivas (DEC-31, DEC-21).
 - [ ] Confirmar DEC-49 con el equipo: mantener los niveles por Recall objetivo, mostrar el percentil del día como complemento y presentar la probabilidad como índice de riesgo.
 - [ ] Reajustar los umbrales con el último año completo en cada reentrenamiento y valorar fijarlos con varios años: los fijados con un solo año van de 0,018 a 0,038 (DEC-41, DEC-49, HU-11).
@@ -710,7 +730,7 @@ Se cerrarán durante la adquisición y el EDA y se registrarán como nuevas entr
 - [ ] Si algún día se quiere mostrar una probabilidad calibrada y no un índice, hará falta un método estable entre años: ajustar con la tasa base del año anterior deja la razón entre 0,77 y 1,50 según el año (DEC-49).
 - [x] Acordar con Frontend el contrato de lectura de Gold: una predicción vigente por municipio y fecha, `v1-respaldo` como «estimación sin FWI», ausencias como «sin dato» y la probabilidad siempre junto al nivel (DEC-48, DEC-49) → implementado en el dashboard (DEC-52).
 - [x] Conectar `inferir.py` y el entrenamiento a `run_pipeline.py` (HU-11, DEC-51).
-- [ ] Probar el orquestador con datos reales: Gold, inferencia desde cero, idempotencia y reentrenamiento reproducible (los umbrales de una versión de prueba deben ser iguales a los de `v1`) (DEC-51).
+- [ ] Probar el orquestador con datos reales: Gold, inferencia desde cero, idempotencia y reentrenamiento reproducible (los umbrales de una versión de prueba deben ser iguales a los de `v1`) (DEC-51). Gold e inferencia desde cero, hechos en máquina limpia (DEC-53); falta el reentrenamiento.
 - [ ] Decidir qué hacer con las etiquetas de 2024 cuando EGIF las publique (mover los años de partición o mantener 2021/2022/2023) y, si procede, pasar las opciones `--anio-*` desde `run_pipeline.py` (DEC-21, DEC-51).
 - [ ] Añadir a `gold_informe.json` la última fecha con dato por variable y los nulos de los últimos 30 días (incluidas las filas sin etiqueta), para documentar el desfase del FWI y de la meteorología (DEC-46, DEC-48).
 - [x] Guardar las predicciones del walk-forward 2016-2022 (`walkforward.py --guardar-predicciones`) y analizarlas con `analisis_walkforward.py` (DEC-47, DEC-49).
