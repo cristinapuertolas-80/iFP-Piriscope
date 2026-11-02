@@ -22,8 +22,8 @@ El modelo con FWI (`con_fwi`) **mejora al FWI** en los tres escenarios de test (
 | `experimento.py` | Entrena las variantes, compara con el FWI y escribe el informe (fases de desarrollo y final) |
 | `walkforward.py` | Validación walk-forward: repite la comparación con el FWI en varios años. Con `--guardar-predicciones` guarda las probabilidades y los umbrales de cada pliegue |
 | `inferir.py` | Inferencia batch con el modelo guardado: dominio del modelo, modelo de respaldo, predicciones, explicaciones SHAP, avisos de calidad y figuras de ejemplo |
-| `modelos_hf.py` | Descarga y subida de Hugging Face los modelos versionados (`models/<versión>_*`: `.joblib`, `.json` y `_umbrales.json`) a `models/`. Descarga: `python -m src.ml.modelos_hf [--version v1]` o `run_pipeline.py --etapas ml --descargar-modelos` (DEC-53); Subida: `python -m src.ml.modelos_hf --subir --version v1 [--dry_run]`|
-| `hf_hub.py` | Publica `predicciones.parquet` y `explicaciones.parquet` en el dataset de Hugging Face en un único commit, tras comprobar que son coherentes (DEC-52) |
+| `modelos_hf.py` | Descarga y subida de Hugging Face los modelos versionados (`models/<versión>_*`: `.joblib`, `.json` y `_umbrales.json`) a `models/`. Descarga: `python -m src.ml.modelos_hf [--version v1]` o `run_pipeline.py --etapas ml --descargar-modelos` (DEC-54). Subida, en un único commit: `python -m src.ml.modelos_hf --subir --version v1 [--dry-run]` |
+| `hf_hub.py` | Publica `predicciones.parquet` y `explicaciones.parquet` en el dataset de Hugging Face en un único commit, tras comprobar que son coherentes (DEC-53). `python -m src.ml.hf_hub [--dry-run]` o `run_pipeline.py --etapas ml --subir-hf` |
 | [`scripts/verificar_salidas.py`](../../scripts/verificar_salidas.py) | Comprueba `predicciones.parquet` y `explicaciones.parquet` (unicidad, cobertura, niveles frente a umbrales, reconstrucción de la probabilidad con SHAP). `run_pipeline.py --etapas ml` lo ejecuta tras la inferencia |
 
 ## Contrato de entrada (tabla de entrenamiento de Gold)
@@ -129,7 +129,7 @@ python scripts/verificar_salidas.py --pred data/gold/predicciones.parquet --expl
 - **Una predicción vigente por municipio y fecha:** al escribir, las nuevas sustituyen a las existentes del mismo municipio y `fecha_objetivo` (aunque tengan otra versión) y a sus explicaciones; así, cuando llega el FWI, `v1` reemplaza a `v1-respaldo`. La escritura es atómica. `--reemplazar` descarta todo lo anterior.
 - **Avisos** por stderr: cobertura baja (`--min-cobertura`), fechas con casi todos los municipios en «medio» o «alto» (`--aviso-alarmas`), muchos nulos meteorológicos en el último día y retraso respecto a hoy (`--max-retraso`).
 - **Figuras de ejemplo** (`--ejemplo-dir`): se generan después de escribir las salidas; si fallan, el código de salida es 2 pero las predicciones ya están escritas.
-- **Publicación en Hugging Face (DEC-52):** `python -m src.ml.hf_hub` (o `run_pipeline.py --etapas ml --subir-hf`, que publica tras inferir y verificar) sube las predicciones y las explicaciones a `data/gold/` del dataset, de donde las descarga el dashboard. Necesita un token con permiso de escritura; `--dry-run` comprueba sin subir.
+- **Publicación en Hugging Face (DEC-53):** `python -m src.ml.hf_hub` (o `run_pipeline.py --etapas ml --subir-hf`, que publica tras inferir y verificar) sube las predicciones y las explicaciones a `data/gold/` del dataset, de donde las descarga el dashboard. Necesita un token con permiso de escritura; `--dry-run` comprueba sin subir.
 
 ### Análisis auxiliares
 
@@ -194,7 +194,7 @@ Al escribir, las predicciones nuevas sustituyen a las existentes del mismo munic
 
 ## Decisiones
 
-Registradas en [docs/decisiones.md](../../docs/decisiones.md), DEC-37 a DEC-52 (contrato de entrada, variantes, entrenamiento, comparación con el baseline, niveles de riesgo, inferencia, SHAP, persistencia de modelos, municipios reservados, dataset de Gold, configuración del modelo, inferencia real con modelo de respaldo, niveles de riesgo, SHAP ampliado, integración en el orquestador y publicación en Hugging Face).
+Registradas en [docs/decisiones.md](../../docs/decisiones.md), DEC-37 a DEC-54 (contrato de entrada, variantes, entrenamiento, comparación con el baseline, niveles de riesgo, inferencia, SHAP, persistencia de modelos, municipios reservados, dataset de Gold, configuración del modelo, inferencia real con modelo de respaldo, niveles de riesgo, SHAP ampliado, integración en el orquestador, publicación en Hugging Face y entrega NF3).
 
 ## Limitaciones y pendientes
 
@@ -206,7 +206,7 @@ Registradas en [docs/decisiones.md](../../docs/decisiones.md), DEC-37 a DEC-52 (
 - **Probabilidad sin calibrar:** sobrestima entre 1,5 y 2,4 veces según el año y una calibración fijada en un año no se mantiene; se presenta como índice de riesgo.
 - **Niveles de riesgo:** política pendiente de confirmar (DEC-49). Los umbrales son provisionales y el Recall objetivo no se reproduce con exactitud de un año a otro.
 - **Etiquetas de 2022 y 2023:** pendiente contrastar con las estadísticas oficiales de EGIF que sean definitivas (DEC-31).
-- Los `.joblib` son pickles: solo cargar ficheros generados por el propio proyecto, y no se suben al repositorio. Los modelos `v1` están en `models/` del dataset de Hugging Face y se descargan con `modelos_hf.py` (DEC-44, DEC-53); el repositorio no tiene comando para subirlos.
+- Los `.joblib` son pickles: solo cargar ficheros generados por el propio proyecto, y no se suben al repositorio. Los modelos `v1` están en `models/` del dataset de Hugging Face y se descargan y se publican con `modelos_hf.py` (DEC-44, DEC-54).
 
 ## Tests
 

@@ -63,6 +63,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 | [DEC-51](#dec-51-integración-de-ml-en-el-orquestador-hu-11) | Integración de ML en el orquestador | Arquitectura | Aceptada |
 | [DEC-52](#dec-52-dashboard-origen-de-los-datos-catálogo-de-municipios-y-presentación) | Dashboard: origen de los datos, catálogo de municipios y presentación | Arquitectura / UX | Aceptada |
 | [DEC-53](#dec-53-publicación-de-las-predicciones-de-gold-en-hugging-face) | Publicación de las predicciones de Gold en Hugging Face | Arquitectura | Aceptada |
+| [DEC-54](#dec-54-entrega-nf3-reproducibilidad-modelos-desde-hugging-face-y-evidencias-en-máquina-limpia) | Entrega NF3: reproducibilidad, modelos desde Hugging Face y evidencias en máquina limpia | Reproducibilidad | Aceptada |
 
 ---
 
@@ -693,7 +694,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 
 ---
 
-### DEC-53. Entrega NF3: reproducibilidad, modelos desde Hugging Face y evidencias en máquina limpia
+### DEC-54. Entrega NF3: reproducibilidad, modelos desde Hugging Face y evidencias en máquina limpia
 
 - **Fecha:** 2026-11-01 · **Estado:** Aceptada
 - **Responsable:** equipo (preparación de la entrega NF3) · **Issue/PR:** nf3/producto-reproducible
@@ -737,7 +738,7 @@ Se cerrarán durante la adquisición y el EDA y se registrarán como nuevas entr
 - [x] Dashboard: mostrar `v1-respaldo` como «estimación sin FWI» y las ausencias como «sin dato» (DEC-48) → DEC-52.
 - [ ] Reducir los días de respaldo: valorar una fuente de FWI más reciente (el retraso actual es de 2 a 3 días) (DEC-48).
 - [ ] Valorar umbrales o niveles alternativos: con el Recall del 80 %, en agosto el 82 % de los municipio-días entra en «medio o superior» (DEC-41). Por mes queda descartado por falta de positivos; cierre en DEC-49.
-- [x] Subir los modelos finales a Hugging Face y enlazarlos (DEC-44): están en `models/` del dataset y se descargan con `python -m src.ml.modelos_hf` o `run_pipeline.py --descargar-modelos` (DEC-53).
+- [x] Subir los modelos finales a Hugging Face y enlazarlos (DEC-44): están en `models/` del dataset y se descargan con `python -m src.ml.modelos_hf` o `run_pipeline.py --descargar-modelos` (DEC-54), y se publican con `python -m src.ml.modelos_hf --subir`.
 - [ ] Contrastar con las estadísticas oficiales si las etiquetas de 2022 y 2023 son definitivas (DEC-31, DEC-21).
 - [ ] Confirmar DEC-49 con el equipo: mantener los niveles por Recall objetivo, mostrar el percentil del día como complemento y presentar la probabilidad como índice de riesgo.
 - [ ] Reajustar los umbrales con el último año completo en cada reentrenamiento y valorar fijarlos con varios años: los fijados con un solo año van de 0,018 a 0,038 (DEC-41, DEC-49, HU-11).
@@ -745,7 +746,7 @@ Se cerrarán durante la adquisición y el EDA y se registrarán como nuevas entr
 - [ ] Si algún día se quiere mostrar una probabilidad calibrada y no un índice, hará falta un método estable entre años: ajustar con la tasa base del año anterior deja la razón entre 0,77 y 1,50 según el año (DEC-49).
 - [x] Acordar con Frontend el contrato de lectura de Gold: una predicción vigente por municipio y fecha, `v1-respaldo` como «estimación sin FWI», ausencias como «sin dato» y la probabilidad siempre junto al nivel (DEC-48, DEC-49) → implementado en el dashboard (DEC-52).
 - [x] Conectar `inferir.py` y el entrenamiento a `run_pipeline.py` (HU-11, DEC-51).
-- [ ] Probar el orquestador con datos reales: Gold, inferencia desde cero, idempotencia y reentrenamiento reproducible (los umbrales de una versión de prueba deben ser iguales a los de `v1`) (DEC-51). Gold e inferencia desde cero, hechos en máquina limpia (DEC-53); falta el reentrenamiento.
+- [ ] Probar el orquestador con datos reales: Gold, inferencia desde cero, idempotencia y reentrenamiento reproducible (los umbrales de una versión de prueba deben ser iguales a los de `v1`) (DEC-51). Gold e inferencia desde cero, hechos en máquina limpia (DEC-54); falta el reentrenamiento.
 - [ ] Decidir qué hacer con las etiquetas de 2024 cuando EGIF las publique (mover los años de partición o mantener 2021/2022/2023) y, si procede, pasar las opciones `--anio-*` desde `run_pipeline.py` (DEC-21, DEC-51).
 - [ ] Añadir a `gold_informe.json` la última fecha con dato por variable y los nulos de los últimos 30 días (incluidas las filas sin etiqueta), para documentar el desfase del FWI y de la meteorología (DEC-46, DEC-48).
 - [x] Guardar las predicciones del walk-forward 2016-2022 (`walkforward.py --guardar-predicciones`) y analizarlas con `analisis_walkforward.py` (DEC-47, DEC-49).
