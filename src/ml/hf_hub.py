@@ -1,4 +1,4 @@
-"""Publicación de las predicciones de Gold en el dataset de Hugging Face (DEC-52).
+"""Publicación de las predicciones de Gold en el dataset de Hugging Face (DEC-53).
 
 El dashboard descarga `predicciones.parquet` y `explicaciones.parquet` de `data/gold/` del dataset
 (`src/dashboard/datos.py`). Este módulo los sube **en un único commit**, de modo que nunca queda publicado un

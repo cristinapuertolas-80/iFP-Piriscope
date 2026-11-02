@@ -212,7 +212,8 @@ Los tests también se ejecutan automáticamente con **GitHub Actions** en cada P
 
 Estado a la entrega de NF3. El detalle de cada punto está en [docs/decisiones.md](docs/decisiones.md) (sección *Decisiones pendientes*) y en [src/ml/README.md](src/ml/README.md).
 
-- **Las predicciones no se actualizan solas.** La ingesta es automática (cron), pero Silver, Gold e inferencia se lanzan a mano con `run_pipeline.py`, y el repositorio no tiene comando para subir a Hugging Face la Gold ni los modelos (Silver sí: `--subir-hf`). El dashboard muestra la última fecha publicada, no la de hoy.
+- **Las predicciones no se actualizan solas.** La ingesta es automática (cron), pero Silver, Gold, inferencia y publicación se lanzan a mano con `run_pipeline.py` (`--subir-hf` publica también la Gold tras inferir y verificar, DEC-53). El dashboard muestra la última fecha publicada, no la de hoy.
+- **Publicación en Hugging Face sin probar contra el dataset real**: `python -m src.ml.hf_hub` (Gold) y `python -m src.ml.modelos_hf --subir` (modelos) están cubiertos por tests con un cliente simulado y sus comprobaciones previas se ejecutan sobre los ficheros reales con `--dry-run` en el workflow de evidencias, pero aún no se ha hecho una subida real con ellos.
 - **El FWI llega con retraso**: los últimos días se predicen con el modelo de respaldo (sin FWI), que no mejora al FWI y discrimina poco (pocos valores distintos por día).
 - **Rendimiento modesto** frente al FWI, un solo año de test, **A Coruña no mejora** al FWI y la probabilidad no está calibrada (se presenta como índice de riesgo). Política de niveles provisional (DEC-49): en sequía casi todos los municipios quedan en «medio» o «alto».
 - **Cobertura**: ~25 municipios sin ninguna variable meteorológica en los días recientes aparecen como «Sin dato» (cobertura ≥ 80 % en todas las fechas). El viento se excluyó por tener ~57 % de nulos.
@@ -273,7 +274,8 @@ iFP-Piriscope/
 │   │   ├── config.py · splits.py · train.py · evaluate.py · risk.py · predict.py
 │   │   ├── experimento.py · walkforward.py · reservados.py
 │   │   ├── inferir.py              #   inferencia con modelo principal y de respaldo + SHAP
-│   │   └── modelos_hf.py           #   descarga de los modelos versionados de Hugging Face
+│   │   ├── hf_hub.py               #   publicación de predicciones y explicaciones de Gold en Hugging Face
+│   │   └── modelos_hf.py           #   descarga y publicación de los modelos versionados en Hugging Face
 │   ├── explainability/             # SHAP: valores, top-5 por predicción, gráficos
 │   │   └── config.py · shap_explain.py · plots.py
 │   └── dashboard/                  # Streamlit: solo lee Gold

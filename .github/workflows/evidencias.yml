@@ -135,6 +135,13 @@ jobs:
             --descargar-modelos --inferir-desde "$INFERIR_DESDE" --ejemplo-dir "$EV/shap" 2>&1 | tee "$EV/06_ml.log"
           ls -la models | tee -a "$EV/06_ml.log"
 
+      - name: "Publicación en Hugging Face: comprobaciones sobre los ficheros reales (--dry-run, no sube nada)"
+        run: |
+          set -o pipefail
+          { echo "### python -m src.ml.hf_hub --dry-run"; python -m src.ml.hf_hub --dry-run 2>&1;
+            echo; echo "### python -m src.ml.modelos_hf --subir --version v1 --dry-run";
+            python -m src.ml.modelos_hf --subir --version v1 --dry-run 2>&1; } | tee "$EV/06b_publicacion_dry_run.txt"
+
       - name: Reproducibilidad de las predicciones
         run: |
           python scripts/comparar_predicciones.py --referencia publicado/predicciones.parquet \

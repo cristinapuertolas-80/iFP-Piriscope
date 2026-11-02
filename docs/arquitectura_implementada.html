@@ -49,7 +49,7 @@
     <div class="sub">
       <div class="caja"><div class="cuerpo"><b>Entrenamiento y evaluación (offline)</b><br><code>experimento.py</code> · <code>walkforward.py</code><br>XGBoost desde 2009, sin viento (DEC-47) · escenarios A/B/C frente al FWI · bootstrap por bloques</div></div>
       <div class="caja"><div class="cuerpo"><b>Modelos versionados</b><br><code>models/v1_xgboost_con_fwi-…</code> (principal)<br><code>models/v1_xgboost_sin_fwi-…</code> (respaldo)<br>+ <code>.json</code> y <code>_umbrales.json</code> · en HF <code>models/</code> · <code>modelos_hf.py</code></div></div>
-      <div class="caja"><div class="cuerpo"><b>Inferencia D+1 + SHAP</b><br><code>inferir.py</code> → <code>predict.py</code>, <code>risk.py</code>, <code>shap_explain.py</code><br>Sin FWI → modelo de respaldo · top-5 SHAP<br><code>scripts/verificar_salidas.py</code></div></div>
+      <div class="caja"><div class="cuerpo"><b>Inferencia D+1 + SHAP</b><br><code>inferir.py</code> → <code>predict.py</code>, <code>risk.py</code>, <code>shap_explain.py</code><br>Sin FWI → modelo de respaldo · top-5 SHAP<br><code>scripts/verificar_salidas.py</code><br>Publicación: <code>hf_hub.py</code></div></div>
     </div></div>
   <div class="flecha"><b>↓</b> Lectura de Gold (Hugging Face por defecto; <code>data/gold/</code> con <code>--local</code>) + <code>docs/resultados/*.csv</code></div>
   <div class="caja"><div class="cab">DASHBOARD STREAMLIT · src/dashboard · <code style="background:none;color:#fff">python run_dashboard.py</code></div>
@@ -61,7 +61,7 @@
     <div class="cuerpo izq">Almacén de datos y modelos (acceso restringido, <code>HF_TOKEN</code>):<br>
     <span class="tag">raw/AEMET</span><span class="tag">raw/EGIF</span><span class="tag">raw/EFFIS</span><span class="tag">raw/INE_CNIG</span><br>
     <span class="tag">data/silver</span><span class="tag">data/gold</span><span class="tag">models</span><br>
-    Bronze → <code>raw/</code> automático (ingesta).<br>Silver → <code>--subir-hf</code>.<br>Gold y modelos: sin comando de subida en el repo.</div></div>
+    Bronze → <code>raw/</code> automático (ingesta).<br>Silver → <code>--subir-hf</code>.<br>Gold → <code>--subir-hf</code> (<code>src/ml/hf_hub.py</code>).<br>Modelos → <code>modelos_hf --subir</code>.</div></div>
   <div class="caja"><div class="cab gris">run_pipeline.py · orquestador</div>
     <div class="cuerpo izq"><code>--etapas ingesta silver gold ml</code><br><code>--desde/--hasta</code> (ingesta, Silver)<br><code>--ml-acciones entrenar inferir</code><br><code>--descargar-modelos</code> · <code>--version-modelo</code><br>Se detiene si falla Silver, Gold o ML</div></div>
   <div class="caja"><div class="cab gris">GitHub Actions</div>
