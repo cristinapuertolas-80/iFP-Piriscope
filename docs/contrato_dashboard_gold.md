@@ -212,7 +212,7 @@ La figura ya cumple la accesibilidad: el sentido de cada barra se indica tambié
 4. **Prioridad relativa:** se muestra como «Prioridad relativa hoy: top N %», calculada por fecha y por versión de modelo. Sigue siendo provisional hasta confirmar DEC-49.
 5. **Aviso de episodio de riesgo generalizado:** con al menos el 90 % de los municipios con predicción en «medio» o «alto»; mensaje informativo, no error.
 
-**Publicación:** `python -m src.ml.hf_hub` o `run_pipeline.py --etapas ml --subir-hf` suben ambos ficheros a `data/gold/` del dataset de Hugging Face en un único commit, tras comprobar que son coherentes (DEC-52). Pendiente de probar con el dataset real.
+**Publicación:** `python -m src.ml.hf_hub` o `run_pipeline.py --etapas ml --subir-hf` suben ambos ficheros a `data/gold/` del dataset de Hugging Face en un único commit, tras comprobar que son coherentes (DEC-53). Pendiente de probar con el dataset real.
 
 ---
 
