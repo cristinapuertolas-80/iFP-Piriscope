@@ -1,0 +1,7 @@
+### python -m src.ml.hf_hub --dry-run
+INFO Gold a publicar en cpuertolas/piriscope (dataset/data/gold): 322.501 predicciones de 2024-01-03 a 2026-10-29
+INFO Simulación: no se sube nada. Token presente.
+
+### python -m src.ml.modelos_hf --subir --version v1 --dry-run
+2026-11-02 06:26:52 INFO    piriscope.ml.modelos_hf | Modelos a publicar en cpuertolas/piriscope (dataset/models): v1_xgboost_con_fwi-sin_viento-desde2009.joblib, v1_xgboost_con_fwi-sin_viento-desde2009.json, v1_xgboost_con_fwi-sin_viento-desde2009_umbrales.json, v1_xgboost_sin_fwi-sin_viento-desde2009.joblib, v1_xgboost_sin_fwi-sin_viento-desde2009.json, v1_xgboost_sin_fwi-sin_viento-desde2009_umbrales.json
+2026-11-02 06:26:52 INFO    piriscope.ml.modelos_hf | Simulación: no se sube nada. Token presente.

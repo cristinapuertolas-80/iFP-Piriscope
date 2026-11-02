@@ -1,0 +1,7 @@
+Vista inicial (última fecha con predicción)
+  captura: evidencias/capturas/01_mapa_y_ficha.png
+  captura: evidencias/capturas/02_tabla_del_dia.png
+  captura: evidencias/capturas/03_modelo_frente_a_fwi.png
+  captura: evidencias/capturas/04_como_leer.png
+Vista compartida por URL (?fecha=2025-08-14&municipio=32054)
+  captura: evidencias/capturas/05_municipio_por_url.png

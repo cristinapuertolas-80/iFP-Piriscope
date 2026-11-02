@@ -1,0 +1,7 @@
+2026-11-02 06:26:26 INFO    piriscope.pipeline | === Gold: python -m src.features ===
+Filas: 2,952,216 (2,628,887 etiquetadas) · 2001-01-01 a 2026-10-28
+Días con incendio (positivos): 78,706 = 2.994 % de las filas etiquetadas
+Prevalencia % por partición: {'entrenamiento': 3.178, 'test': 0.75, 'validacion': 1.366}
+Nulos % (filas etiquetadas): {'temperatura': 18.54, 'humedad_relativa': 27.24, 'viento': 57.13, 'precipitacion': 19.68, 'racha_dias_secos': 23.13, 'precip_acum_7d': 24.77, 'mes': 0.0, 'fwi': 3.25, 'ffmc': 3.25, 'dmc': 3.25, 'dc': 3.25, 'isi': 3.25, 'bui': 3.25}
+Escrito en /home/runner/work/iFP-Piriscope/iFP-Piriscope/data/gold
+duración: 0:09.02 · memoria máx: 2687572 KB

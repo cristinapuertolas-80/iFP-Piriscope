@@ -1,0 +1,74 @@
+2026-11-02 06:26:36 INFO    piriscope.pipeline | === ML: inferencia batch D+1 y SHAP ===
+2026-11-02 06:26:36 INFO    httpx2 | HTTP Request: GET https://huggingface.co/api/datasets/cpuertolas/piriscope/revision/main "HTTP/1.1 200 OK"
+2026-11-02 06:26:37 INFO    httpx2 | HTTP Request: GET https://huggingface.co/api/datasets/cpuertolas/piriscope/tree/3a9f05e2a872ca45745fb7bbc6fe204f93717663?recursive=true&expand=false "HTTP/1.1 200 OK"
+2026-11-02 06:26:37 INFO    httpx2 | HTTP Request: GET https://huggingface.co/api/datasets/cpuertolas/piriscope/tree/3a9f05e2a872ca45745fb7bbc6fe204f93717663?expand=false&recursive=true&limit=1000&cursor=ZXlKbWFXeGxYMjVoYldVaU9pSnlZWGN2UVVWTlJWUXZNakF5TmpFd01UaFVNVFkwTlRBMFdpOWthV0Z5YVc5ekx6RTJNekZGWHpJd01ETXRNVEl0TWpkZk1qQXdNeTB4TWkwek1TNXFjMjl1SWl3aWRISmxaVjl2YVdRaU9pSm1NemcwTVdNME9HTTROalppTlRSa1pqRTJOekprWTJSa05tSmlZbUZrT1RkaE1HUmxPREJrSW4wPToxMDAw "HTTP/1.1 200 OK"
+2026-11-02 06:26:37 INFO    httpx2 | HTTP Request: GET https://huggingface.co/api/datasets/cpuertolas/piriscope/tree/3a9f05e2a872ca45745fb7bbc6fe204f93717663?expand=false&recursive=true&limit=1000&cursor=ZXlKbWFXeGxYMjVoYldVaU9pSnlZWGN2UVVWTlJWUXZNakF5TmpFd01UaFVNVGMwTVRVeldpOWthV0Z5YVc5ekx6RTJPVFpQWHpJd01URXRNVEl0TWpkZk1qQXhNUzB4TWkwek1TNXFjMjl1SWl3aWRISmxaVjl2YVdRaU9pSm1NemcwTVdNME9HTTROalppTlRSa1pqRTJOekprWTJSa05tSmlZbUZrT1RkaE1HUmxPREJrSW4wPToyMDAw "HTTP/1.1 200 OK"
+2026-11-02 06:26:38 INFO    httpx2 | HTTP Request: GET https://huggingface.co/api/datasets/cpuertolas/piriscope/tree/3a9f05e2a872ca45745fb7bbc6fe204f93717663?expand=false&recursive=true&limit=1000&cursor=ZXlKbWFXeGxYMjVoYldVaU9pSnlZWGN2UVVWTlJWUXZNakF5TmpFd01UaFVNVGd6TkRBeldpOWthV0Z5YVc5ekx6RTJOVGhmTWpBeE55MHdOaTB6TUY4eU1ERTNMVEV5TFRJMkxtcHpiMjRpTENKMGNtVmxYMjlwWkNJNkltWXpPRFF4WXpRNFl6ZzJObUkxTkdSbU1UWTNNbVJqWkdRMlltSmlZV1E1TjJFd1pHVTRNR1FpZlE9PTozMDAw "HTTP/1.1 200 OK"
+2026-11-02 06:26:38 INFO    httpx2 | HTTP Request: GET https://huggingface.co/api/datasets/cpuertolas/piriscope/tree/3a9f05e2a872ca45745fb7bbc6fe204f93717663?expand=false&recursive=true&limit=1000&cursor=ZXlKbWFXeGxYMjVoYldVaU9pSnlZWGN2UVVWTlJWUXZNakF5TmpFd01UaFVNVGt5TlRVd1dpOWthV0Z5YVc5ekx6RTJOemxCWHpJd01qTXRNRFl0TXpCZk1qQXlNeTB4TWkweU5pNXFjMjl1SWl3aWRISmxaVjl2YVdRaU9pSm1NemcwTVdNME9HTTROalppTlRSa1pqRTJOekprWTJSa05tSmlZbUZrT1RkaE1HUmxPREJrSW4wPTo0MDAw "HTTP/1.1 200 OK"
+2026-11-02 06:26:38 INFO    httpx2 | HTTP Request: GET https://huggingface.co/api/datasets/cpuertolas/piriscope/tree/3a9f05e2a872ca45745fb7bbc6fe204f93717663?expand=false&recursive=true&limit=1000&cursor=ZXlKbWFXeGxYMjVoYldVaU9pSnlZWGN2UVVWTlJWUXZNakF5TmpFd016RlVNVEF5TlRFMFdpOWthV0Z5YVc5ekx6RTBORFpZWHpJd01qWXRNVEF0TWpGZk1qQXlOaTB4TUMwek1DNXFjMjl1SWl3aWRISmxaVjl2YVdRaU9pSm1NemcwTVdNME9HTTROalppTlRSa1pqRTJOekprWTJSa05tSmlZbUZrT1RkaE1HUmxPREJrSW4wPTo1MDAw "HTTP/1.1 200 OK"
+Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]2026-11-02 06:26:38 INFO    httpx2 | HTTP Request: HEAD https://huggingface.co/datasets/cpuertolas/piriscope/resolve/3a9f05e2a872ca45745fb7bbc6fe204f93717663/models/v1_xgboost_con_fwi-sin_viento-desde2009.json "HTTP/1.1 200 OK"
+2026-11-02 06:26:38 INFO    httpx2 | HTTP Request: HEAD https://huggingface.co/datasets/cpuertolas/piriscope/resolve/3a9f05e2a872ca45745fb7bbc6fe204f93717663/models/v1_xgboost_con_fwi-sin_viento-desde2009_umbrales.json "HTTP/1.1 200 OK"
+2026-11-02 06:26:38 INFO    httpx2 | HTTP Request: HEAD https://huggingface.co/datasets/cpuertolas/piriscope/resolve/3a9f05e2a872ca45745fb7bbc6fe204f93717663/models/v1_xgboost_sin_fwi-sin_viento-desde2009.json "HTTP/1.1 200 OK"
+2026-11-02 06:26:38 INFO    httpx2 | HTTP Request: HEAD https://huggingface.co/datasets/cpuertolas/piriscope/resolve/3a9f05e2a872ca45745fb7bbc6fe204f93717663/models/v1_xgboost_sin_fwi-sin_viento-desde2009_umbrales.json "HTTP/1.1 200 OK"
+2026-11-02 06:26:38 INFO    httpx2 | HTTP Request: GET https://huggingface.co/api/datasets/cpuertolas/piriscope/xet-read-token/3a9f05e2a872ca45745fb7bbc6fe204f93717663 "HTTP/1.1 200 OK"
+2026-11-02 06:26:38 INFO    httpx2 | HTTP Request: GET https://huggingface.co/datasets/cpuertolas/piriscope/resolve/3a9f05e2a872ca45745fb7bbc6fe204f93717663/models/v1_xgboost_con_fwi-sin_viento-desde2009.json "HTTP/1.1 200 OK"
+Fetching 6 files:  17%|█▋        | 1/6 [00:00<00:00,  5.98it/s]2026-11-02 06:26:38 INFO    httpx2 | HTTP Request: GET https://huggingface.co/datasets/cpuertolas/piriscope/resolve/3a9f05e2a872ca45745fb7bbc6fe204f93717663/models/v1_xgboost_con_fwi-sin_viento-desde2009_umbrales.json "HTTP/1.1 200 OK"
+2026-11-02 06:26:38 INFO    httpx2 | HTTP Request: GET https://huggingface.co/datasets/cpuertolas/piriscope/resolve/3a9f05e2a872ca45745fb7bbc6fe204f93717663/models/v1_xgboost_sin_fwi-sin_viento-desde2009.json "HTTP/1.1 200 OK"
+2026-11-02 06:26:38 INFO    httpx2 | HTTP Request: GET https://huggingface.co/datasets/cpuertolas/piriscope/resolve/3a9f05e2a872ca45745fb7bbc6fe204f93717663/models/v1_xgboost_sin_fwi-sin_viento-desde2009_umbrales.json "HTTP/1.1 200 OK"
+Fetching 6 files:  83%|████████▎ | 5/6 [00:00<00:00,  5.51it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00,  6.45it/s]
+2026-11-02 06:26:39 INFO    piriscope.ml.modelos_hf | Modelos v1 descargados en /home/runner/work/iFP-Piriscope/iFP-Piriscope/models: v1_xgboost_con_fwi-sin_viento-desde2009, v1_xgboost_sin_fwi-sin_viento-desde2009
+Modelo v1_xgboost_con_fwi-sin_viento-desde2009 · 8,562 predicciones para 2026-10-02 a 2026-10-29 (313 municipios)
+Niveles de riesgo en la última fecha: {'bajo': 249, 'medio': 24, 'alto': 13}
+Cobertura en la última fecha: 286 de 313 municipios
+id_municipio fecha_objetivo  probabilidad nivel_riesgo  fwi
+       32009     2026-10-29        0.0242         alto  NaN
+       32017     2026-10-29        0.0242         alto  NaN
+       32021     2026-10-29        0.0242         alto  NaN
+       32028     2026-10-29        0.0242         alto  NaN
+       32050     2026-10-29        0.0242         alto  NaN
+Fuera del dominio del modelo principal (falta alguna variable que nunca faltó al entrenar): 2,504 filas -> 2,302 con el modelo de respaldo, 202 sin predicción
+Sustituidas 6,498 predicciones anteriores del mismo municipio y fecha (p. ej. v1-respaldo por v1)
+Escrito: /home/runner/work/iFP-Piriscope/iFP-Piriscope/data/gold/predicciones.parquet y /home/runner/work/iFP-Piriscope/iFP-Piriscope/data/gold/explicaciones.parquet
+Ejemplo: evidencias/shap/shap_local_27016_2026-10-21.html
+Ejemplo: evidencias/shap/shap_cascada_27016_2026-10-21.html
+Ejemplo: evidencias/shap/shap_global.csv
+Ejemplo: evidencias/shap/shap_global.html
+Ejemplo: evidencias/shap/shap_global_grupos.csv
+Ejemplo: evidencias/shap/shap_global_grupos.html
+322,501 predicciones · 2024-01-03 a 2026-10-29 · versiones: {'v1': 320199, 'v1-respaldo': 2302}
+
+[OK] id_prediccion único
+[OK] una sola predicción por municipio y fecha
+[OK] probabilidades en [0, 1] y sin nulos
+[OK] niveles de riesgo válidos
+[OK] id_municipio con 5 cifras (texto)
+[OK] explicaciones y predicciones con los mismos ids · 0 ids sin pareja
+[OK] 5 variables por predicción · {5: 322501}
+[OK] sin variable repetida dentro de una predicción
+[OK] valor_shap sin nulos
+[OK] valor_base y shap_resto sin nulos (DEC-50)
+[OK] valor_base + SHAP reconstruye la probabilidad · diferencia máxima 1.19e-07
+[OK] las filas del modelo principal tienen FWI
+[OK] las filas de respaldo no llevan FWI
+[OK] las explicaciones del respaldo no usan variables FWI · []
+       valores distintos de probabilidad del respaldo por fecha: {Timestamp('2026-10-22 00:00:00'): 9, Timestamp('2026-10-23 00:00:00'): 6, Timestamp('2026-10-24 00:00:00'): 12, Timestamp('2026-10-25 00:00:00'): 14, Timestamp('2026-10-26 00:00:00'): 13, Timestamp('2026-10-27 00:00:00'): 27, Timestamp('2026-10-28 00:00:00'): 12, Timestamp('2026-10-29 00:00:00'): 17}
+[OK] cobertura >= 80% en todas las fechas · mínima 91% el 2026-10-29; 8 fecha(s) incompletas
+       últimas fechas: {Timestamp('2026-10-26 00:00:00'): 288, Timestamp('2026-10-27 00:00:00'): 288, Timestamp('2026-10-28 00:00:00'): 288, Timestamp('2026-10-29 00:00:00'): 286} de 313
+[OK] niveles coherentes con los umbrales del modelo principal · medio=0.0273, alto=0.0449
+[OK] niveles coherentes con los umbrales del modelo respaldo · medio=0.0220, alto=0.0241
+[OK] ninguna fecha saturada que incluya filas de respaldo (posible artefacto de datos)
+[AVISO] 84 fecha(s) con >= 95% en medio o alto, solo con modelo principal (suele ser sequía real, ver DEC-49); máximo 100% el 2024-04-23
+       última fecha: {'bajo': 249, 'medio': 24, 'alto': 13}; 17 probabilidades distintas
+
+Todo correcto
+duración: 0:14.56 · memoria máx: 1964684 KB
+total 400
+drwxr-xr-x  2 runner runner   4096 Nov  2 06:26 .
+drwxr-xr-x 15 runner runner   4096 Nov  2 06:22 ..
+-rw-r--r--  1 runner runner      0 Nov  2 06:20 .gitkeep
+-r--r--r--  1 runner runner 227385 Nov  2 06:26 v1_xgboost_con_fwi-sin_viento-desde2009.joblib
+-rw-r--r--  1 runner runner    776 Nov  2 06:26 v1_xgboost_con_fwi-sin_viento-desde2009.json
+-rw-r--r--  1 runner runner    215 Nov  2 06:26 v1_xgboost_con_fwi-sin_viento-desde2009_umbrales.json
+-r--r--r--  1 runner runner 154422 Nov  2 06:26 v1_xgboost_sin_fwi-sin_viento-desde2009.joblib
+-rw-r--r--  1 runner runner    703 Nov  2 06:26 v1_xgboost_sin_fwi-sin_viento-desde2009.json
+-rw-r--r--  1 runner runner    215 Nov  2 06:26 v1_xgboost_sin_fwi-sin_viento-desde2009_umbrales.json

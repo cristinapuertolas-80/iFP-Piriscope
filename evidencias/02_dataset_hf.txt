@@ -1,0 +1,28 @@
+Dataset: cpuertolas/piriscope · revisión 3a9f05e2a872ca45745fb7bbc6fe204f93717663 · última modificación 2026-11-01 11:21:08+00:00
+.gitattributes                    1 ficheros        0.0 MB
+data/bronze                       1 ficheros        0.0 MB
+data/gold                         3 ficheros       21.3 MB
+data/landing                      5 ficheros      267.2 MB
+data/silver                      16 ficheros      122.0 MB
+models                            7 ficheros        0.4 MB
+raw/AEMET                      4884 ficheros      205.9 MB
+raw/EFFIS                       365 ficheros       38.6 MB
+raw/EGIF                          9 ficheros       42.7 MB
+raw/INE_CNIG                      3 ficheros      233.8 MB
+
+data/gold/202610041546                                                       0.00 MB
+data/gold/explicaciones.parquet                                             17.99 MB
+data/gold/predicciones.parquet                                               3.33 MB
+models/202610041546                                                          0.00 MB
+models/v1_xgboost_con_fwi-sin_viento-desde2009.joblib                        0.23 MB
+models/v1_xgboost_con_fwi-sin_viento-desde2009.json                          0.00 MB
+models/v1_xgboost_con_fwi-sin_viento-desde2009_umbrales.json                 0.00 MB
+models/v1_xgboost_sin_fwi-sin_viento-desde2009.joblib                        0.15 MB
+models/v1_xgboost_sin_fwi-sin_viento-desde2009.json                          0.00 MB
+models/v1_xgboost_sin_fwi-sin_viento-desde2009_umbrales.json                 0.00 MB
+
+Última ingesta archivada por fuente (raw/<FUENTE>/<timestamp>):
+  AEMET      20261101T111822Z
+  EFFIS      20261026T103149Z
+  EGIF       20261018T161655Z
+  INE_CNIG   20261018T161647Z

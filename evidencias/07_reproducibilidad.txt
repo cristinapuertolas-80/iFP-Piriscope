@@ -1,0 +1,13 @@
+version_modelo  en_ambos  solo_referencia  solo_nuevo  dif_max_probabilidad  dif_media_probabilidad  cambios_de_nivel
+         total      6235              576        2640          1.694893e-03            1.902848e-06                 0
+            v1      5947                0         626          1.862645e-09            4.698113e-13                 0
+   v1-respaldo       288              576        2014          1.694893e-03            4.119533e-05                 0
+
+DIFERENCIAS: 6,235 predicciones comunes, diferencia máxima 1.69e-03 (tolerancia 1e-06), 0 cambios de nivel
+
+Gold regenerada: 322,501 predicciones · última fecha_objetivo 2026-10-29
+niveles en la última fecha: {'bajo': 249, 'medio': 24, 'alto': 13} · versiones: {'v1-respaldo': 286}
+
+Predicciones comunes con diferencia > 1e-6: 7
+  de ellas, con algún valor de entrada (top-5 SHAP) distinto o con otras variables en el top-5: 7 de 7
+  fechas afectadas: ['2026-10-22']
