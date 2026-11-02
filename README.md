@@ -300,6 +300,7 @@ Cada carpeta de `src/` tiene su propio README con el detalle de sus módulos. Lo
 
 - [NF1 · Presentación y viabilidad](docs/NF1_Presentacion_y_Viabilidad.pdf)
 - [NF2 · Documentación y diseño técnico](docs/NF2_Documentacion_y_Diseno_Tecnico.pdf)
+- [NF3 · Producto funcional y repositorio reproducible](docs/NF3_Producto_Funcional_y_Repositorio_Reproducible.pdf) (describe el tag `nf3-final`, commit `ee9b8e0`; evidencias en la rama [`evidencias/nf3`](https://github.com/cristinapuertolas-80/iFP-Piriscope/tree/evidencias/nf3))
 - [Plan de ingesta de datos](docs/plan_ingesta.md)
 - [Decisiones de diseño](docs/decisiones.md)
 - [Contrato de datos entre ML y dashboard](docs/contrato_dashboard_gold.md)
