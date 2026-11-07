@@ -1,0 +1,3 @@
+predicciones.parquet publicado: 320,437 filas · 313 municipios · 2024-01-03 a 2026-10-22
+versiones: {'v1': 319573, 'v1-respaldo': 864}
+fecha_insert más reciente: 2026-10-31 01:24:26.576085+00:00

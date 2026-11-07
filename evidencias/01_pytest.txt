@@ -1,0 +1,46 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.16, pytest-9.2.0, pluggy-1.7.0
+rootdir: /home/runner/work/iFP-Piriscope/iFP-Piriscope
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.16.0
+collected 358 items
+
+tests/test_aemet.py .........                                            [  2%]
+tests/test_cli.py .........                                              [  5%]
+tests/test_common.py ........                                            [  7%]
+tests/test_config.py .......                                             [  9%]
+tests/test_dashboard.py .........                                        [ 11%]
+tests/test_effis.py ...........                                          [ 14%]
+tests/test_egif.py .................                                     [ 19%]
+tests/test_errores_red.py ....                                           [ 20%]
+tests/test_evaluate.py ...................                               [ 25%]
+tests/test_experimento.py ...............                                [ 30%]
+tests/test_features.py .......................                           [ 36%]
+tests/test_hf_gold.py ..........                                         [ 39%]
+tests/test_hf_hub.py ..                                                  [ 39%]
+tests/test_inferir.py .....................                              [ 45%]
+tests/test_modelos_hf.py ...                                             [ 46%]
+tests/test_predict.py ..........                                         [ 49%]
+tests/test_reservados.py ...........                                     [ 52%]
+tests/test_risk.py .....                                                 [ 53%]
+tests/test_run_dashboard.py ..........                                   [ 56%]
+tests/test_run_pipeline_ml.py ............................               [ 64%]
+tests/test_scripts.py ..........                                         [ 67%]
+tests/test_shap.py .............                                         [ 70%]
+tests/test_shap_valores.py .............                                 [ 74%]
+tests/test_silver_basicos.py ................                            [ 79%]
+tests/test_silver_fwi.py ......                                          [ 80%]
+tests/test_silver_hf_hub.py ...                                          [ 81%]
+tests/test_silver_incendios.py ...........                               [ 84%]
+tests/test_silver_meteo.py ........                                      [ 86%]
+tests/test_silver_pipeline.py .....                                      [ 88%]
+tests/test_silver_validacion.py ........s                                [ 90%]
+tests/test_splits.py ..........                                          [ 93%]
+tests/test_train.py .................                                    [ 98%]
+tests/test_walkforward.py ......                                         [100%]
+
+- generated xml file: /home/runner/work/iFP-Piriscope/iFP-Piriscope/evidencias/01_pytest.xml -
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_silver_validacion.py:83: No hay tablas Silver reales en data/silver (ejecuta python -m src.silver)
+======================= 357 passed, 1 skipped in 29.63s ========================
