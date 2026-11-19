@@ -14,8 +14,6 @@
 name: Predicción diaria
 
 on:
-  push:
-    branches: [feat/prediccion-diaria]   # TEMPORAL: quitar antes de fusionar, tests en rama feat/prediccion-diaria
   workflow_run:
     workflows: ["Ingesta automática"]   # debe coincidir con el name: de ingesta.yml
     types: [completed]
@@ -41,8 +39,7 @@ env:
 
 jobs:
   prediccion:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' # Temporal para tests
-    # if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -56,6 +53,13 @@ jobs:
 
       - name: Instalar dependencias
         run: pip install -r environment/requirements.txt
+
+      - name: Caché del Bronze de HF
+              uses: actions/cache@v4
+              with:
+                path: data/hf
+                key: bronze-hf-${{ github.run_id }}
+                restore-keys: bronze-hf-
 
       - name: Bronze desde Hugging Face y Silver
         env:
