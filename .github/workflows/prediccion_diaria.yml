@@ -1,0 +1,147 @@
+# Predicción diaria automática: se lanza cuando termina bien "Ingesta automática".
+# Silver -> Gold -> inferencia -> verificación -> publicación en Hugging Face.
+# Si algo falla, abre (o comenta) una issue con el enlace al log.
+#
+# Secret: HF_TOKEN (el mismo de la ingesta; lectura + escritura sobre el dataset).
+# Variables (Settings -> Secrets and variables -> Actions -> Variables):
+#   HF_REPO_ID    por defecto cpuertolas/piriscope
+#   HF_PUBLICAR   "true" para subir de verdad. Sin definir (o distinto de true) el
+#                 workflow hace todo salvo subir: hf_hub --dry-run.
+#
+# workflow_run solo funciona con el fichero en la rama por defecto. Para probarlo
+# antes, usar "Run workflow" (workflow_dispatch) desde la rama de trabajo.
+
+name: Predicción diaria
+
+on:
+  workflow_run:
+    workflows: ["Ingesta automática"]   # debe coincidir con el name: de ingesta.yml
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: prediccion-diaria
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  HF_REPO_ID: ${{ vars.HF_REPO_ID || 'cpuertolas/piriscope' }}
+  PUBLICAR: ${{ vars.HF_PUBLICAR || 'false' }}
+  VERSION_MODELO: v1
+  MODELO: v1_xgboost_con_fwi-sin_viento-desde2009
+  RESPALDO: v1_xgboost_sin_fwi-sin_viento-desde2009
+  # Se repredicen los últimos N días: cuando llega el FWI, v1 sustituye a v1-respaldo
+  VENTANA_DIAS: "30"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  prediccion:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: environment/requirements.txt
+
+      - name: Instalar dependencias
+        run: pip install -r environment/requirements.txt
+
+      - name: Caché del Bronze de HF
+        uses: actions/cache@v4
+        with:
+          path: data/hf
+          key: bronze-hf-${{ github.run_id }}
+          restore-keys: bronze-hf-
+
+      - name: Bronze desde Hugging Face y Silver
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python -m src.silver --descargar-hf     # valida al terminar; código 1 si falla
+
+      - name: Gold
+        run: python -m src.features
+
+      - name: Descargar modelos
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python -m src.ml.modelos_hf --version "$VERSION_MODELO"
+
+      # El runner está vacío: sin esto, la subida sustituiría el histórico por un solo día
+      - name: Recuperar predicciones anteriores
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          from huggingface_hub import hf_hub_download
+          from huggingface_hub.utils import EntryNotFoundError
+          for f in ("predicciones", "explicaciones"):
+              try:
+                  p = hf_hub_download(os.environ["HF_REPO_ID"], f"data/gold/{f}.parquet",
+                                      repo_type="dataset", token=os.environ["HF_TOKEN"],
+                                      local_dir=".")
+                  print("recuperado:", p)
+              except EntryNotFoundError:
+                  print("no existe todavía:", f)
+          PY
+
+      - name: Inferencia
+        run: |
+          DESDE=$(date -u -d "-${VENTANA_DIAS} days" +%F)
+          python -m src.ml.inferir --modelo "$MODELO" --modelo-respaldo "$RESPALDO" --desde "$DESDE"
+
+      - name: Verificar salidas
+        run: |
+          python scripts/verificar_salidas.py \
+            --pred data/gold/predicciones.parquet --expl data/gold/explicaciones.parquet \
+            --dataset data/gold/dataset_municipio_dia.parquet --models-dir models \
+            --modelo "$MODELO" --respaldo "$RESPALDO"
+
+      - name: Publicar en Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ "$PUBLICAR" = "true" ]; then
+            python -m src.ml.hf_hub
+          else
+            echo "HF_PUBLICAR != true: solo comprobación, no se sube nada"
+            python -m src.ml.hf_hub --dry-run
+          fi
+
+      - name: Guardar informes de la ejecución
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prediccion-diaria-${{ github.run_id }}
+          path: |
+            data/silver/informes/informe_calidad.json
+            data/silver/informes/validacion.json
+            data/gold/gold_informe.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Abrir issue si falla
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create prediccion-diaria --color D93F0B \
+            --description "Fallo del workflow de predicción diaria" 2>/dev/null || true
+          N=$(gh issue list --label prediccion-diaria --state open --json number --jq '.[0].number // empty')
+          CUERPO="La predicción diaria ha fallado. Log: $RUN_URL"
+          if [ -n "$N" ]; then
+            gh issue comment "$N" --body "$CUERPO"
+          else
+            gh issue create --label prediccion-diaria \
+              --title "Falla la predicción diaria ($(date -u +%F))" --body "$CUERPO"
+          fi
