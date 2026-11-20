@@ -55,11 +55,11 @@ jobs:
         run: pip install -r environment/requirements.txt
 
       - name: Caché del Bronze de HF
-              uses: actions/cache@v4
-              with:
-                path: data/hf
-                key: bronze-hf-${{ github.run_id }}
-                restore-keys: bronze-hf-
+        uses: actions/cache@v4
+        with:
+          path: data/hf
+          key: bronze-hf-${{ github.run_id }}
+          restore-keys: bronze-hf-
 
       - name: Bronze desde Hugging Face y Silver
         env:
