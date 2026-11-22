@@ -116,6 +116,9 @@ jobs:
             python -m src.ml.hf_hub --dry-run
           fi
 
+      - name: Monitorización
+        run: python -m src.ml.monitorizar --resumen-md "$GITHUB_STEP_SUMMARY"
+
       - name: Guardar informes de la ejecución
         if: always()
         uses: actions/upload-artifact@v4
@@ -125,6 +128,7 @@ jobs:
             data/silver/informes/informe_calidad.json
             data/silver/informes/validacion.json
             data/gold/gold_informe.json
+            data/gold/monitorizacion.json
           if-no-files-found: ignore
           retention-days: 30
 
