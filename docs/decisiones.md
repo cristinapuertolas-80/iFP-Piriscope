@@ -64,6 +64,9 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
 | [DEC-52](#dec-52-dashboard-origen-de-los-datos-catálogo-de-municipios-y-presentación) | Dashboard: origen de los datos, catálogo de municipios y presentación | Arquitectura / UX | Aceptada |
 | [DEC-53](#dec-53-publicación-de-las-predicciones-de-gold-en-hugging-face) | Publicación de las predicciones de Gold en Hugging Face | Arquitectura | Aceptada |
 | [DEC-54](#dec-54-entrega-nf3-reproducibilidad-modelos-desde-hugging-face-y-evidencias-en-máquina-limpia) | Entrega NF3: reproducibilidad, modelos desde Hugging Face y evidencias en máquina limpia | Reproducibilidad | Aceptada |
+| [DEC-55](#dec-55-predicción-diaria-automática-en-github-actions) | Predicción diaria automática en GitHub Actions | Arquitectura / Proceso | Aceptada |
+| [DEC-56](#dec-56-monitorización-del-sistema-y-desviación-de-las-variables-de-entrada) | Monitorización del sistema y desviación de las variables de entrada | Calidad / Operación | Aceptada (umbrales provisionales) |
+| [DEC-57](#dec-57-reproducibilidad-del-reentrenamiento-comparación-de-v1-con-v1-check) | Reproducibilidad del reentrenamiento: comparación de v1 con v1-check | Reproducibilidad | Aceptada |
 
 ---
 
@@ -689,6 +692,7 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
   - `run_pipeline.py --etapas ml --subir-hf` publica **después de inferir y verificar**. No publica si falla la inferencia, la verificación o la subida de la etapa, ni cuando solo se entrena. Con `--sin-verificar` publica tras las comprobaciones propias del módulo.
   - `python -m src.ml.hf_hub --dry-run` comprueba y muestra qué subiría, sin subir nada. La subida necesita un token con **permiso de escritura** (`HF_TOKEN`).
   - No sube modelos (DEC-44) ni los datasets de entrenamiento.
+  - Desde DEC-56, si en `data/gold/` hay un `monitorizacion.json` válido y de la misma última fecha, lo sube en el mismo commit; si no, lo omite con un aviso y publica igualmente las predicciones.
 - **Alternativas descartadas:** subir los ficheros uno a uno (el dashboard podría leer un par incoherente entre las dos subidas); subir sin comprobar (publicaría datos que el verificador habría rechazado); dejar la subida manual.
 - **Consecuencias:** cada subida reemplaza los dos ficheros completos (no es incremental); el dashboard los recoge al pulsar «Comprobar si hay datos nuevos»; un token de solo lectura no basta; `tests/test_hf_gold.py` (10 tests) y los de `test_run_pipeline_ml.py` cubren la lógica con un cliente simulado, no la subida real.
 
@@ -711,6 +715,70 @@ Las decisiones iniciales proceden del documento de diseño técnico de la fase N
   - Primera ejecución (commit `4030140`, run 41315927283): Silver se regenera en ~7 min (96 comprobaciones, 0 errores, 2 avisos); Gold en ~10 s (2.952.216 filas, 2001-01-01 a 2026-10-28); la inferencia desde 2026-10-01 llega a 2026-10-29 y pasa `verificar_salidas.py`. De las 6.235 predicciones comunes con las publicadas (fechas objetivo 2026-10-02 a 2026-10-22), las 5.947 `v1` coinciden (diferencia máxima 1,9·10⁻⁹) y solo 7 `v1-respaldo`, todas del 2026-10-22, difieren más de 10⁻⁶ (máximo 1,7·10⁻³, sin cambio de nivel): en las 7 cambian los valores de entrada guardados en las explicaciones, es decir, los datos de ese día se actualizaron después de publicar (AEMET publica con retraso y la ingesta vuelve a pedir los últimos 10 días). Con las mismas entradas, el pipeline reproduce las salidas.
   - El workflow necesita el secret `HF_TOKEN` y permiso de escritura de contenidos solo para la rama de evidencias.
   - El reentrenamiento (`--ml-acciones entrenar`) sigue sin verificarse con datos reales (pendiente de DEC-51).
+
+---
+
+### DEC-55. Predicción diaria automática en GitHub Actions
+
+- **Fecha:** 2026-11-24 · **Estado:** Aceptada (la publicación real se activa con `HF_PUBLICAR=true`; pendiente de activar)
+- **Responsable:** Hikari (ML) · **Issue/PR:** feat/prediccion-diaria
+- **Contexto:** la ingesta era automática (DEC-31), pero Silver, Gold, la inferencia y la publicación se lanzaban a mano: el README listaba como limitación que «las predicciones no se actualizan solas». NF4 premia que el sistema funcione sin intervención.
+- **Decisión:**
+  - `.github/workflows/prediccion_diaria.yml` se dispara con `workflow_run` cuando termina bien **Ingesta automática** (y a mano con `workflow_dispatch`). Cadena: Silver con `--descargar-hf` (que valida al terminar) → Gold → descarga del modelo `v1` (`modelos_hf`) → recuperación de las predicciones y explicaciones ya publicadas → `inferir` → `verificar_salidas.py` → monitorización (DEC-56) → `hf_hub`.
+  - Antes de inferir recupera de Hugging Face `predicciones.parquet` y `explicaciones.parquet`: el runner está vacío y la publicación sustituye los dos ficheros completos (DEC-53), así que sin ellos solo quedarían los días recién predichos.
+  - Predice los últimos 30 días (`VENTANA_DIAS`), no solo el último: cuando llega el FWI de días predichos con el respaldo, `v1` los sustituye (DEC-48).
+  - **Publicación segura:** solo sube si existe la variable de repositorio `HF_PUBLICAR=true`; sin ella ejecuta `hf_hub --dry-run`. Así el flujo completo se prueba sin tocar el dataset.
+  - Si falla un paso, abre una issue con la etiqueta `prediccion-diaria` y el enlace al log (o comenta en la que ya esté abierta). Guarda `informe_calidad.json`, `validacion.json`, `gold_informe.json` y `monitorizacion.json` como artefactos durante 30 días.
+  - Cachea `data/hf` con `actions/cache` (clave por ejecución y `restore-keys` por prefijo) para no descargar el Bronze entero cada día.
+  - `concurrency` sin cancelar, para que dos ejecuciones (los lunes hay dos ingestas) no se pisen; permisos `contents: read` e `issues: write`.
+- **Alternativas descartadas:** un `cron` propio (no garantiza que la ingesta haya terminado ni que haya ido bien); un job más dentro de `ingesta.yml` (mezcla dos responsabilidades y alarga la ingesta); inferir solo el último día (se perdería el histórico y los días de respaldo no se corregirían); publicar desde la primera ejecución (sin periodo de prueba).
+- **Consecuencias:**
+  - Ejecución de prueba en la rama (datos del 19/11/2026): 8 minutos en total, de los cuales 7 son la descarga del Bronze desde Hugging Face. En local, con el Bronze ya descargado, comprobar la descarga cuesta unos 51 s (2 min 11 s frente a 1 min 20 s de Silver sin descargar): la descarga es incremental. El efecto de la caché se medirá en `main`, porque las cachés de una rama no las ve `main`.
+  - Si la ingesta falla (por ejemplo, por un error 500 de AEMET), la predicción de ese día no se ejecuta; se recupera al día siguiente porque la ingesta pide los últimos 10 días y la predicción reprocesa 30.
+  - `workflow_run` solo funciona con el fichero en la rama por defecto y apunta al `name:` de `ingesta.yml`: si se renombra, deja de dispararse.
+  - Necesita los secrets que ya usa la ingesta (`HF_TOKEN`).
+  - Pendiente: probar el encadenado desde `main`, medir la caché y activar `HF_PUBLICAR=true`.
+
+---
+
+### DEC-56. Monitorización del sistema y desviación de las variables de entrada
+
+- **Fecha:** 2026-11-24 · **Estado:** Aceptada (umbrales provisionales)
+- **Responsable:** Hikari (ML) · **Issue/PR:** pendiente
+- **Contexto:** los datos llegan con retraso (FWI y AEMET), las últimas fechas se predicen con el modelo de respaldo, hay municipios sin datos y los meses recientes de FWI son intermedios. Faltaba una forma de ver, en cada ejecución, si el sistema está sano (pendiente de `gold_informe.json`, DEC-46 y DEC-48).
+- **Decisión:**
+  - `src/ml/monitorizar.py` (`python -m src.ml.monitorizar`) escribe `data/gold/monitorizacion.json` (esquema en el [contrato](contrato_dashboard_gold.md)): estado global (`ok` o `revisar`) con avisos e información; por fecha de los últimos 30 días, los municipios con predicción, el % de respaldo, los niveles y el número de probabilidades distintas; el retraso de AEMET y del FWI y los días de FWI intermedio (a partir de `informe_calidad.json`); y, por variable del modelo, su comparación con el entrenamiento.
+  - Es informativo: termina con código 0 aunque haya avisos. En el workflow va antes de publicar con `continue-on-error`, de modo que un fallo suyo nunca impide publicar las predicciones.
+  - **Avisos:** cobertura de la última fecha inferior al 90 %; retraso de AEMET superior a 7 días; retraso del FWI superior a 14 días; variable «fuera de lo habitual». Solo se informa (sin aviso) de que las últimas fechas usan el respaldo, porque el FWI siempre llega con retraso, y del episodio generalizado (DEC-49).
+  - **Desviación de las variables de entrada:** z-score de la media de los últimos 30 días frente a las medias de esos mismos días del año (±3 días) en cada año de entrenamiento desde 2009. «Vigilar» desde |z| = 2 y «fuera de lo habitual» (estado interno `deriva`) desde |z| = 3. Con menos de 5 años de historial se usa el PSI con umbrales 0,10 y 0,25. El PSI (deciles de la referencia) se calcula y se publica, pero no decide.
+  - `hf_hub` sube el JSON en el mismo commit que las predicciones solo si es válido y su última fecha coincide con la de `predicciones.parquet`; si no, lo omite con un aviso. El dashboard lo lee en la pestaña «Estado del sistema» y, sin él, muestra un mensaje.
+  - Cierra el pendiente de `gold_informe.json`: última fecha por fuente y nulos recientes por variable.
+- **Alternativas descartadas:**
+  - PSI con umbrales fijos como criterio: frente a una referencia de varios años, una ventana reciente se concentra en pocos deciles y el PSI se satura aunque el año sea normal. En una simulación con 13 otoños de nivel distinto dio 7,3 para un año dentro del rango y 8,3 para uno fuera, y entre 6,8 y 8,3 para cada año de entrenamiento frente al resto. Con datos reales dio hasta 5,58 (`dc`) y marcó 7 de 11 variables.
+  - Comparar noviembre con todo el año de entrenamiento: toda la meteorología «derivaría» por la estación.
+  - Avisar por el % de respaldo: en las últimas fechas es siempre del 100 % por el retraso del FWI.
+  - Hacer fallar el workflow ante un aviso: la monitorización informa, no bloquea.
+  - Monitorizar el rendimiento real del modelo (AUC-PR, Recall): **pendiente de redactar por Hikari** (motivo y tratamiento).
+- **Consecuencias:**
+  - Primera ejecución con datos reales (datos hasta el 15/11/2026): temperatura (z −0,03), humedad relativa (−0,9), precipitación (−0,45), racha de días secos (0,65) y precipitación acumulada a 7 días (−1,11) quedan estables; `fwi` (3,67), `isi` (3,37) y `bui` (3,08) quedan fuera de lo habitual, y `ffmc` (2,32), `dmc` (2,76) y `dc` (2,25) en vigilar.
+  - Comprobación sobre los datos diarios: el FWI responde a la lluvia y a la humedad, no hay salto en el paso de julio (consolidado) a agosto (intermedio) y el DC supera la media histórica de cada mes de abril a agosto y en octubre. Lectura provisional: un otoño muy seco; no se descarta una diferencia entre el FWI de ERA5 y la meteorología de AEMET, y la comparación del FWI intermedio con el consolidado sigue pendiente.
+  - Los umbrales son provisionales y se ajustarán con las primeras semanas de ejecuciones reales. Los avisos de retraso reflejan la frecuencia de las ingestas (AEMET diaria, FWI semanal).
+  - `tests/test_monitorizacion.py`, `tests/test_hf_hub_monitorizacion.py` y `tests/test_dashboard_monitorizacion.py` cubren el cálculo (incluido un año lento normal que no debe dar aviso aunque su PSI sea enorme), la publicación condicionada y la lectura en el dashboard.
+
+---
+
+### DEC-57. Reproducibilidad del reentrenamiento: comparación de v1 con v1-check
+
+- **Fecha:** 2026-11-24 · **Estado:** Aceptada
+- **Responsable:** Hikari (ML) · **Issue/PR:** pendiente
+- **Contexto:** DEC-51 y DEC-54 dejaban pendiente comprobar que un reentrenamiento reproduce el modelo: los umbrales de una versión de prueba deben ser iguales a los de `v1`.
+- **Decisión:** reentrenar la configuración de DEC-47 con `python -m src.ml.experimento --final --variantes con_fwi sin_fwi --anio-desde 2009 --excluir viento --guardar --version v1-check` y compararla con `python scripts/comparar_modelos.py v1 v1-check`. El script compara, por variante, el `.json` del modelo y su `_umbrales.json`, ignorando la fecha de entrenamiento, la versión y el identificador, con tolerancia relativa de 1e-6; devuelve 1 si hay diferencias o faltan ficheros.
+- **Alternativas descartadas:** comparar solo los umbrales (no detectaría cambios en los parámetros ni en `best_iteration`).
+- **Consecuencias:**
+  - Resultado: **igual en todos los ficheros comparados**, tanto en el modelo con FWI como en el de respaldo.
+  - `best_iteration` es 1 en el modelo sin FWI y 31 en el modelo con FWI (de 500 árboles posibles): la parada temprana corta pronto y el modelo de respaldo queda con muy pocos árboles. Con tan pocos árboles, la reproducibilidad depende de usar las mismas versiones de las librerías (lockfile, DEC-54).
+  - Se comprobó con `experimento.py --final`; la ruta del orquestador (`--ml-acciones entrenar`) sigue sin verificarse con datos reales.
+  - Los ficheros `v1-check_*` son de prueba y no se publican en Hugging Face.
 
 ---
 
@@ -742,15 +810,18 @@ Se cerrarán durante la adquisición y el EDA y se registrarán como nuevas entr
 - [ ] Contrastar con las estadísticas oficiales si las etiquetas de 2022 y 2023 son definitivas (DEC-31, DEC-21).
 - [ ] Confirmar DEC-49 con el equipo: mantener los niveles por Recall objetivo, mostrar el percentil del día como complemento y presentar la probabilidad como índice de riesgo.
 - [ ] Reajustar los umbrales con el último año completo en cada reentrenamiento y valorar fijarlos con varios años: los fijados con un solo año van de 0,018 a 0,038 (DEC-41, DEC-49, HU-11).
-- [ ] Comparar el FWI intermedio con el consolidado en los meses que tengan ambos: el modelo se entrena con el consolidado y las predicciones recientes usan el intermedio (DEC-34, DEC-48).
+- [ ] Comparar el FWI intermedio con el consolidado en los meses que tengan ambos: el modelo se entrena con el consolidado y las predicciones recientes usan el intermedio (DEC-34, DEC-48). La monitorización de noviembre de 2026 marcó el FWI, el ISI y el BUI como «fuera de lo habitual» (DEC-56).
 - [ ] Si algún día se quiere mostrar una probabilidad calibrada y no un índice, hará falta un método estable entre años: ajustar con la tasa base del año anterior deja la razón entre 0,77 y 1,50 según el año (DEC-49).
 - [x] Acordar con Frontend el contrato de lectura de Gold: una predicción vigente por municipio y fecha, `v1-respaldo` como «estimación sin FWI», ausencias como «sin dato» y la probabilidad siempre junto al nivel (DEC-48, DEC-49) → implementado en el dashboard (DEC-52).
 - [x] Conectar `inferir.py` y el entrenamiento a `run_pipeline.py` (HU-11, DEC-51).
-- [ ] Probar el orquestador con datos reales: Gold, inferencia desde cero, idempotencia y reentrenamiento reproducible (los umbrales de una versión de prueba deben ser iguales a los de `v1`) (DEC-51). Gold e inferencia desde cero, hechos en máquina limpia (DEC-54); falta el reentrenamiento.
+- [ ] Probar el orquestador con datos reales: Gold, inferencia desde cero, idempotencia y reentrenamiento reproducible (los umbrales de una versión de prueba deben ser iguales a los de `v1`) (DEC-51). Gold e inferencia desde cero, hechos en máquina limpia (DEC-54); el reentrenamiento reproducible se comprobó con `experimento.py --final` (DEC-57) y falta hacerlo desde el orquestador.
 - [ ] Decidir qué hacer con las etiquetas de 2024 cuando EGIF las publique (mover los años de partición o mantener 2021/2022/2023) y, si procede, pasar las opciones `--anio-*` desde `run_pipeline.py` (DEC-21, DEC-51).
-- [ ] Añadir a `gold_informe.json` la última fecha con dato por variable y los nulos de los últimos 30 días (incluidas las filas sin etiqueta), para documentar el desfase del FWI y de la meteorología (DEC-46, DEC-48).
+- [x] Añadir a `gold_informe.json` la última fecha con dato por variable y los nulos de los últimos 30 días (incluidas las filas sin etiqueta), para documentar el desfase del FWI y de la meteorología (DEC-46, DEC-48) → `monitorizacion.json`: última fecha por fuente y nulos recientes por variable (DEC-56).
 - [x] Guardar las predicciones del walk-forward 2016-2022 (`walkforward.py --guardar-predicciones`) y analizarlas con `analisis_walkforward.py` (DEC-47, DEC-49).
 - [ ] Documentar en la memoria y en el dashboard que el modelo no supera al FWI en A Coruña (DEC-47). Hecho en el dashboard (DEC-52); falta la memoria.
+- [ ] Probar el encadenado `workflow_run` desde `main`, medir el efecto de la caché y activar la publicación diaria con `HF_PUBLICAR=true` (DEC-55).
+- [ ] Ajustar los umbrales de la monitorización (z de 2 y 3, cobertura del 90 %, retrasos de 7 y 14 días) con las primeras semanas de ejecuciones reales (DEC-56).
+- [ ] Reintentar los errores 5xx de AEMET en la ingesta y anotarlos como incidencia sin abortar la ingesta del día (DEC-30, DEC-55).
 
 ---
 
