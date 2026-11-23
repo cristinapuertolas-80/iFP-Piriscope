@@ -24,6 +24,7 @@ from src.dashboard.graficos import (  # noqa: E402
     COLORES_NIVEL, ETIQUETA_NIVEL, TEXTO_SOBRE_NIVEL, fig_evaluacion_grupos, fig_historico, fig_mapa,
     fig_walkforward,
 )
+from src.dashboard.graficos_estado import fig_cobertura, fig_deriva, fig_niveles  # noqa: E402
 from src.explainability.plots import ETIQUETAS, fig_cascada, fig_global, fig_local  # noqa: E402
 
 VARIABLES_FWI = {"fwi", "ffmc", "dmc", "dc", "isi", "bui"}
@@ -83,6 +84,11 @@ def cargar_mapa() -> tuple[dict, pd.DataFrame]:
 @st.cache_data(show_spinner=False, max_entries=500)
 def cargar_explicacion(ruta: str, id_prediccion: str) -> pd.DataFrame:
     return datos.leer_explicacion(Path(ruta), id_prediccion)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def cargar_monitorizacion() -> dict | None:
+    return datos.leer_monitorizacion()
 
 
 @st.cache_data(show_spinner=False)
@@ -261,8 +267,9 @@ st.title("🔥 Riesgo de incendio forestal en Galicia")
 st.caption(f"Predicción para el **{datos.fmt_fecha(fecha)}** a partir de los datos hasta el día anterior · "
            "313 municipios")
 
-tab_mapa, tab_tabla, tab_eval, tab_info = st.tabs(
-    ["🗺️ Mapa y municipio", "📋 Tabla del día", "📊 Modelo frente a FWI", "ℹ️ Cómo leer el dashboard"])
+tab_mapa, tab_tabla, tab_eval, tab_estado, tab_info = st.tabs(
+    ["🗺️ Mapa y municipio", "📋 Tabla del día", "📊 Modelo frente a FWI", "🩺 Estado del sistema",
+     "ℹ️ Cómo leer el dashboard"])
 
 with tab_mapa:
     if not hay_dia:
@@ -433,6 +440,78 @@ with tab_eval:
         fig.update_traces(cliponaxis=False)
         st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
         st.caption("Calculado sobre la validación de 2022 con el modelo principal. No cambia con cada predicción.")
+
+def _dias(valor) -> str:
+    return "—" if valor is None else f"{valor} d"
+
+
+with tab_estado:
+    mon = cargar_monitorizacion()
+    if mon is None:
+        st.info("Todavía no hay datos de monitorización publicados. Se generan en cada ejecución diaria del "
+                "pipeline y se suben junto a las predicciones.")
+    else:
+        pred_m, fuentes_m, deriva_m = mon["predicciones"], mon["fuentes"], mon["deriva"]
+        ult = pred_m["ultima_fecha"]
+        if mon["avisos"]:
+            st.warning("**Hay puntos que revisar en la última ejecución:**\n\n" + "\n".join(f"- {a}" for a in mon["avisos"]))
+        else:
+            st.success("Sin avisos en la última ejecución.")
+        for nota in mon.get("info", []):
+            st.info(nota)
+        st.markdown(tarjetas([
+            ("Última fecha predicha", datos.fmt_fecha(pred_m["ultima_fecha_objetivo"]),
+             "Última fecha con predicción publicada"),
+            ("Municipios con predicción", datos.fmt_pct(ult["cobertura_pct"] / 100, 0),
+             f"{ult['municipios']} municipios en la última fecha"),
+            ("Con modelo de respaldo", datos.fmt_pct(ult["pct_respaldo"] / 100, 0),
+             "Porcentaje de predicciones de la última fecha hechas sin FWI"),
+            ("Retraso de AEMET", _dias(fuentes_m["aemet"]["retraso_dias"]),
+             "Días entre la ejecución y el último dato meteorológico"),
+            ("Retraso del FWI", _dias(fuentes_m["fwi"]["retraso_dias"]),
+             "Días entre la ejecución y el último dato de FWI"),
+            ("Mayor desviación (z)", datos.fmt_num(deriva_m.get("z_max_abs"), 1),
+             f"Variable más alejada de los años de entrenamiento: "
+             f"{ETIQUETAS.get(deriva_m.get('variable_z_max'), deriva_m.get('variable_z_max') or 'sin dato')}"),
+        ]), unsafe_allow_html=True)
+
+        ventana = datos.tabla_ventana(mon)
+        g1, g2 = st.columns(2)
+        with g1:
+            st.markdown(f"**Municipios por nivel · últimos {pred_m['ventana']['dias']} días**")
+            st.plotly_chart(fig_niveles(ventana), width="stretch", config={"displayModeBar": False})
+        with g2:
+            st.markdown("**Cobertura y modelo de respaldo (%)**")
+            st.plotly_chart(fig_cobertura(ventana), width="stretch", config={"displayModeBar": False})
+        st.caption("Las últimas fechas suelen hacerse con el modelo de respaldo porque el FWI llega con retraso.")
+
+        st.markdown("**Variables de entrada frente a los mismos días de los años de entrenamiento**")
+        tabla = datos.tabla_deriva(mon)
+        st.plotly_chart(fig_deriva(tabla, deriva_m["umbrales"], ETIQUETAS), width="stretch",
+                        config={"displayModeBar": False})
+        detalle = pd.DataFrame({
+            "Variable": tabla["variable"].map(lambda v: ETIQUETAS.get(v, v)),
+            "Desviación (z)": tabla["z"].map(lambda v: datos.fmt_num(v, 1)),
+            "Estado": tabla["estado"].map(lambda e: datos.ESTADOS_DERIVA.get(e, e)),
+            "Media reciente": tabla["media_reciente"].map(lambda v: datos.fmt_num(v, 1)),
+            "Media en años anteriores": tabla["media_historica"].map(lambda v: datos.fmt_num(v, 1)),
+            "PSI (informativo)": tabla["psi"].map(lambda v: datos.fmt_num(v, 1)),
+            "Nulos recientes": tabla["nulos_pct_reciente"].map(lambda v: datos.fmt_pct(v / 100)),
+            "Nulos en el entrenamiento": tabla["nulos_pct_referencia"].map(lambda v: datos.fmt_pct(v / 100)),
+        })
+        st.dataframe(detalle, hide_index=True, width="stretch")
+        with st.expander("Cómo se calcula y qué no mide"):
+            st.markdown(
+                f"- **Método:** {deriva_m['metodo']}.\n"
+                f"- **Umbrales (provisionales):** «vigilar» desde {datos.fmt_num(deriva_m['umbrales']['vigilar'], 1)} "
+                f"y «fuera de lo habitual» desde {datos.fmt_num(deriva_m['umbrales']['deriva'], 1)} "
+                "desviaciones típicas. Un valor fuera de lo habitual no es un fallo: puede ser, por ejemplo, un otoño "
+                "muy seco.\n"
+                "- El **PSI** se muestra a título informativo: con una sola ventana reciente frente a varios años, "
+                "se dispara en variables lentas como el FWI incluso en años normales.\n"
+                "- Mide si los datos de entrada se parecen a los del entrenamiento, la cobertura y los retrasos de las "
+                "fuentes. **No mide el acierto real del modelo.**")
+        st.caption(f"Generado el {pd.Timestamp(mon['generado_utc']).strftime('%d/%m/%Y %H:%M')} UTC")
 
 with tab_info:
     st.markdown(f"""

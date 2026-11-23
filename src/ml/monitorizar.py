@@ -3,7 +3,7 @@
 Genera ``data/gold/monitorizacion.json`` con el estado de la última ejecución:
 cobertura de municipios, uso del modelo de respaldo, reparto de niveles, retraso
 de las fuentes (AEMET y FWI) y deriva (PSI) de las variables frente al
-entrenamiento. No mide el rendimiento real del modelo: las etiquetas de EGIF
+entrenamiento (ver ``_bloque_deriva``). No mide el rendimiento real del modelo: las etiquetas de EGIF
 llegan con más de un año de retraso.
 
 Uso (desde la raíz del repositorio, tras la inferencia):
@@ -39,6 +39,12 @@ VARIABLES_POR_DEFECTO = [
 EXCLUIDAS_DERIVA = {"mes", "viento"}
 
 # Umbrales PROVISIONALES: ajustar tras las primeras semanas de ejecuciones reales.
+# Deriva = media reciente frente a las medias de los MISMOS DÍAS de cada año de entrenamiento (z-score).
+Z_VIGILAR = 2.0
+Z_DERIVA = 3.0
+MIN_ANIOS_HISTORICO = 5
+# PSI: solo informativo (y criterio de respaldo si hay menos de MIN_ANIOS_HISTORICO años). Frente a una referencia
+# de varios años, una ventana reciente se concentra en pocos deciles y el PSI se satura aunque el año sea normal.
 PSI_VIGILAR = 0.10
 PSI_DERIVA = 0.25
 COBERTURA_MIN_PCT = 90.0      # municipios con predicción en la última fecha
@@ -92,6 +98,16 @@ def estado_psi(valor) -> str:
     return "estable"
 
 
+def estado_z(z) -> str:
+    if z is None:
+        return "sin_datos"
+    if abs(z) >= Z_DERIVA:
+        return "deriva"
+    if abs(z) >= Z_VIGILAR:
+        return "vigilar"
+    return "estable"
+
+
 def _mascara_estacional(fechas_ref: pd.Series, fechas_act: pd.Series, margen: int = MARGEN_ESTACIONAL_DIAS):
     """Filas de la referencia cuyo día del año cae cerca de alguno de la ventana actual.
 
@@ -99,10 +115,10 @@ def _mascara_estacional(fechas_ref: pd.Series, fechas_act: pd.Series, margen: in
     «derivaría» solo por la estación.
     """
     permitido = np.zeros(367, dtype=bool)
-    for d in fechas_act.dt.dayofyear.unique():
+    for d in fechas_act.dt.day_of_year.unique():
         for k in range(-margen, margen + 1):
             permitido[(int(d) - 1 + k) % 366 + 1] = True
-    return permitido[fechas_ref.dt.dayofyear.to_numpy()]
+    return permitido[fechas_ref.dt.day_of_year.to_numpy()]
 
 
 # ------------------------------------------------------------------- bloques
@@ -169,6 +185,13 @@ def _bloque_fuentes(calidad: dict, hoy: date) -> dict:
 
 
 def _bloque_deriva(dataset, entrenamiento, variables, ventana, anio_desde) -> dict:
+    """Compara la ventana reciente con los mismos días del año de cada año de entrenamiento.
+
+    Criterio (``estado``): z-score de la media reciente frente a las medias anuales de esos mismos días en los años
+    de entrenamiento (con menos de ``MIN_ANIOS_HISTORICO`` años se usa el PSI con umbrales fijos). El PSI se calcula y
+    se informa, pero no decide: con una referencia de varios años y una sola ventana, las variables lentas (DC, DMC,
+    BUI, FWI) dan PSI altísimo cada año, también los normales.
+    """
     ds = dataset.copy()
     ds["fecha"] = pd.to_datetime(ds["fecha"])
     fmax = ds["fecha"].max()
@@ -178,32 +201,71 @@ def _bloque_deriva(dataset, entrenamiento, variables, ventana, anio_desde) -> di
     ent = entrenamiento.copy()
     ent["fecha"] = pd.to_datetime(ent["fecha"])
     ent = ent[(ent["particion"] == "entrenamiento") & (ent["fecha"].dt.year >= anio_desde)]
-    ent = ent[_mascara_estacional(ent["fecha"], act["fecha"])]
+    anio = ent["fecha"].dt.year.to_numpy()
+    m_ref = _mascara_estacional(ent["fecha"], act["fecha"])                # ±MARGEN días del año
+    m_ven = _mascara_estacional(ent["fecha"], act["fecha"], margen=0)      # exactamente los mismos días del año
+    anios = np.unique(anio[m_ven])
 
     filas = []
     for var in variables:
         if var not in act.columns or var not in ent.columns:
             continue
-        valor = psi(ent[var], act[var])
+        x = ent[var].to_numpy(dtype=float, na_value=np.nan)
+        valor_psi = psi(x[m_ref], act[var])
+        medias, psi_hist = [], []
+        for a in anios:
+            xa = x[m_ven & (anio == a)]
+            xa = xa[~np.isnan(xa)]
+            if len(xa) >= 30:
+                medias.append(float(xa.mean()))
+            p = psi(x[m_ref & (anio != a)], xa)
+            if p is not None:
+                psi_hist.append(p)
+        v = act[var].to_numpy(dtype=float, na_value=np.nan)
+        v = v[~np.isnan(v)]
+        media_rec = float(v.mean()) if len(v) >= 30 else None
+        mu = sd = z = None
+        if media_rec is not None and len(medias) >= MIN_ANIOS_HISTORICO:
+            mu, sd = float(np.mean(medias)), float(np.std(medias, ddof=1))
+            z = (media_rec - mu) / sd if sd > 0 else None
+        if z is not None:
+            estado = estado_z(z)
+        elif valor_psi is not None:
+            estado = estado_psi(valor_psi)       # sin historial suficiente: PSI con umbrales fijos
+        else:
+            estado = "sin_datos"
+        redondea = lambda q, n: None if q is None else round(float(q), n)   # noqa: E731
         filas.append({
             "variable": var,
-            "psi": None if valor is None else round(valor, 4),
-            "estado": estado_psi(valor),
-            "n_reciente": int(act[var].notna().sum()),
+            "z": redondea(z, 2),
+            "psi": redondea(valor_psi, 4),
+            "psi_historico_max": redondea(max(psi_hist) if psi_hist else None, 4),
+            "estado": estado,
+            "media_reciente": redondea(media_rec, 3),
+            "media_historica": redondea(mu, 3),
+            "sd_historica": redondea(sd, 3),
+            "n_anios_historico": len(medias),
+            "n_reciente": int(len(v)),
             "nulos_pct_reciente": round(100 * float(act[var].isna().mean()), 1),
-            "nulos_pct_referencia": round(100 * float(ent[var].isna().mean()), 1),
+            "nulos_pct_referencia": round(100 * float(np.isnan(x[m_ref]).mean()), 1) if m_ref.any() else None,
         })
     con_psi = [f for f in filas if f["psi"] is not None]
-    peor = max(con_psi, key=lambda f: f["psi"]) if con_psi else None
+    con_z = [f for f in filas if f["z"] is not None]
+    peor_psi = max(con_psi, key=lambda f: f["psi"]) if con_psi else None
+    peor_z = max(con_z, key=lambda f: abs(f["z"])) if con_z else None
     return {
-        "metodo": f"PSI con deciles de la referencia; referencia = entrenamiento desde {anio_desde}, "
-                  f"mismos días del año (±{MARGEN_ESTACIONAL_DIAS}) que la ventana reciente",
-        "umbrales": {"vigilar": PSI_VIGILAR, "deriva": PSI_DERIVA},
+        "metodo": f"z-score de la media de los últimos {ventana} días frente a las medias de esos mismos días del año "
+                  f"(±{MARGEN_ESTACIONAL_DIAS}) en cada año de entrenamiento desde {anio_desde}; con menos de "
+                  f"{MIN_ANIOS_HISTORICO} años se usa el PSI. El PSI se informa pero no decide",
+        "umbrales": {"vigilar": Z_VIGILAR, "deriva": Z_DERIVA, "psi_vigilar": PSI_VIGILAR, "psi_deriva": PSI_DERIVA},
         "ventana": {"desde": desde.strftime("%Y-%m-%d"), "hasta": fmax.strftime("%Y-%m-%d")},
-        "n_filas_referencia": int(len(ent)),
+        "n_filas_referencia": int(m_ref.sum()),
         "n_filas_ventana": int(len(act)),
-        "psi_max": None if peor is None else peor["psi"],
-        "variable_psi_max": None if peor is None else peor["variable"],
+        "n_anios_historico": int(len(anios)),
+        "z_max_abs": None if peor_z is None else abs(peor_z["z"]),
+        "variable_z_max": None if peor_z is None else peor_z["variable"],
+        "psi_max": None if peor_psi is None else peor_psi["psi"],
+        "variable_psi_max": None if peor_psi is None else peor_psi["variable"],
         "variables": filas,
     }
 
@@ -222,7 +284,8 @@ def _avisos(pred_b, fuentes, deriva) -> tuple[list[str], list[str]]:
         avisos.append(f"El FWI lleva {r} días de retraso (máximo {RETRASO_FWI_MAX}).")
     en_deriva = [f["variable"] for f in deriva["variables"] if f["estado"] == "deriva"]
     if en_deriva:
-        avisos.append("Deriva (PSI ≥ %.2f): %s." % (PSI_DERIVA, ", ".join(en_deriva)))
+        avisos.append("Fuera de lo habitual (media reciente a %.0f o más desviaciones típicas de los mismos días de "
+                      "los años de entrenamiento): %s." % (Z_DERIVA, ", ".join(en_deriva)))
     if pred_b["dias_finales_con_respaldo"]:
         info.append(f"Las últimas {pred_b['dias_finales_con_respaldo']} fechas se predicen con el modelo de "
                     "respaldo (sin FWI): discrimina poco.")
@@ -264,7 +327,8 @@ def resumen_markdown(i: dict) -> str:
          f"respaldo {u['pct_respaldo']} % · niveles {u['niveles']}",
          f"- Retraso: AEMET {f['aemet']['retraso_dias']} d · FWI {f['fwi']['retraso_dias']} d "
          f"({f['fwi']['dias_intermedio']} días de FWI intermedio)",
-         f"- Deriva: PSI máx. {i['deriva']['psi_max']} ({i['deriva']['variable_psi_max']})"]
+         f"- Desviación: z máx. {i['deriva']['z_max_abs']} ({i['deriva']['variable_z_max']}) · "
+         f"PSI máx. {i['deriva']['psi_max']} (informativo)"]
     l += [f"- ⚠️ {a}" for a in i["avisos"]] + [f"- ℹ️ {a}" for a in i["info"]]
     return "\n".join(l) + "\n"
 

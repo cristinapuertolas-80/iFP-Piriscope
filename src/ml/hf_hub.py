@@ -5,6 +5,10 @@ El dashboard descarga `predicciones.parquet` y `explicaciones.parquet` de `data/
 par incoherente, y solo si pasan comprobaciones básicas: ficheros presentes, columnas del contrato, una
 predicción por municipio y fecha y las mismas `id_prediccion` en ambos ficheros.
 
+Si en `data/gold` hay un `monitorizacion.json` válido y de la misma última fecha que las predicciones
+(lo genera `src/ml/monitorizar.py`), se sube en el mismo commit. Si no existe, no es válido o es de otra
+ejecución, se omite con un aviso: la monitorización nunca bloquea la publicación de las predicciones.
+
 No sube modelos (DEC-44) ni los datasets de entrenamiento. Hace falta un token con **permiso de escritura**
 (`HF_TOKEN` en `.env`, el mismo de la ingesta).
 
@@ -16,6 +20,7 @@ Uso:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
@@ -28,6 +33,7 @@ log = logging.getLogger("piriscope.ml.hf")
 
 RUTA_EN_HF = "data/gold"
 FICHEROS = ("predicciones.parquet", "explicaciones.parquet")
+FICHERO_MONITORIZACION = "monitorizacion.json"
 COLUMNAS_PREDICCIONES = ("id_prediccion", "id_municipio", "fecha_objetivo", "version_modelo", "probabilidad",
                          "nivel_riesgo")
 COLUMNAS_EXPLICACIONES = ("id_prediccion", "variable", "valor_shap")
@@ -57,6 +63,27 @@ def _motivo(exc: Exception) -> str:
     if "401" in texto or "403" in texto:
         return "acceso denegado: el token necesita permiso de escritura sobre el dataset"
     return f"{type(exc).__name__}: {texto[:200]}"
+
+
+def _comprobar_monitorizacion(gold_dir: Path, fecha_max) -> Path | None:
+    """Ruta de `monitorizacion.json` si existe y corresponde a las predicciones; si no, `None`.
+
+    Nunca lanza: un fichero ausente, roto o de otra ejecución solo hace que no se publique.
+    """
+    ruta = gold_dir / FICHERO_MONITORIZACION
+    if not ruta.exists():
+        return None
+    try:
+        contenido = json.loads(ruta.read_text(encoding="utf-8"))
+        ultima = pd.Timestamp(contenido["predicciones"]["ultima_fecha_objetivo"]).normalize()
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        log.warning("%s no es válido (%s): no se publica.", FICHERO_MONITORIZACION, type(exc).__name__)
+        return None
+    if ultima != pd.Timestamp(fecha_max).normalize():
+        log.warning("%s es de otra ejecución (última fecha %s frente a %s en las predicciones): no se publica.",
+                    FICHERO_MONITORIZACION, ultima.date(), pd.Timestamp(fecha_max).date())
+        return None
+    return ruta
 
 
 def comprobar_gold(gold_dir: Path | None = None) -> dict:
@@ -89,7 +116,8 @@ def comprobar_gold(gold_dir: Path | None = None) -> dict:
     fechas = pd.to_datetime(p["fecha_objetivo"])
     return {"rutas": rutas, "n_predicciones": len(p), "n_explicaciones": len(e),
             "fecha_min": fechas.min(), "fecha_max": fechas.max(),
-            "dec50": all(c in cols_e for c in COLUMNAS_DEC50)}
+            "dec50": all(c in cols_e for c in COLUMNAS_DEC50),
+            "monitorizacion": _comprobar_monitorizacion(gold_dir, fechas.max())}
 
 
 def subir_gold(gold_dir: Path | None = None, repo_id: str | None = None, repo_type: str | None = None,
@@ -107,6 +135,8 @@ def subir_gold(gold_dir: Path | None = None, repo_id: str | None = None, repo_ty
     f_min, f_max = resumen["fecha_min"], resumen["fecha_max"]
     log.info("Gold a publicar en %s (%s/%s): %s predicciones de %s a %s", repo_id, repo_type, RUTA_EN_HF,
              f"{resumen['n_predicciones']:,}".replace(",", "."), f_min.date(), f_max.date())
+    log.info("Monitorización: %s", f"se publicará {FICHERO_MONITORIZACION}" if resumen["monitorizacion"]
+             else f"sin {FICHERO_MONITORIZACION} válido y actual (no se publica)")
     if dry_run:
         log.info("Simulación: no se sube nada. Token %s.", "presente" if token else "AUSENTE (hace falta uno de escritura)")
         return None
@@ -117,6 +147,9 @@ def subir_gold(gold_dir: Path | None = None, repo_id: str | None = None, repo_ty
 
     operaciones = [CommitOperationAdd(path_in_repo=f"{RUTA_EN_HF}/{nombre}", path_or_fileobj=str(ruta))
                    for nombre, ruta in resumen["rutas"].items()]
+    if resumen["monitorizacion"]:
+        operaciones.append(CommitOperationAdd(path_in_repo=f"{RUTA_EN_HF}/{FICHERO_MONITORIZACION}",
+                                              path_or_fileobj=str(resumen["monitorizacion"])))
     mensaje = (f"Gold: {resumen['n_predicciones']:,} predicciones ({f_min.date()} a {f_max.date()})"
                .replace(",", "."))
     api = api or HfApi(token=token)

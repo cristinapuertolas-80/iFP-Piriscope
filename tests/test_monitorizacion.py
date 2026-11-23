@@ -41,11 +41,11 @@ def _datos(desplazar_fwi=0.0):
     fechas_ent = pd.date_range("2010-01-01", "2012-12-31")
     ent = pd.DataFrame({"fecha": np.repeat(fechas_ent, 3)})
     ent["particion"] = "entrenamiento"
-    ent["temperatura"] = 10 + 8 * np.sin((ent["fecha"].dt.dayofyear - 110) / 365 * 2 * np.pi) + rng.normal(size=len(ent))
+    ent["temperatura"] = 10 + 8 * np.sin((ent["fecha"].dt.day_of_year - 110) / 365 * 2 * np.pi) + rng.normal(size=len(ent))
     ent["fwi"] = rng.gamma(2, 2, size=len(ent))
     fechas_act = pd.date_range("2026-10-01", "2026-11-15")
     ds = pd.DataFrame({"fecha": np.repeat(fechas_act, 10), "id_municipio": municipios * len(fechas_act)})
-    ds["temperatura"] = 10 + 8 * np.sin((ds["fecha"].dt.dayofyear - 110) / 365 * 2 * np.pi) + rng.normal(size=len(ds))
+    ds["temperatura"] = 10 + 8 * np.sin((ds["fecha"].dt.day_of_year - 110) / 365 * 2 * np.pi) + rng.normal(size=len(ds))
     ds["fwi"] = rng.gamma(2, 2, size=len(ds)) + desplazar_fwi
     ds.loc[ds["fecha"] > "2026-11-10", "fwi"] = np.nan
     filas = []
@@ -88,7 +88,7 @@ def test_deriva_detectada_y_retrasos():
     calidad["indicador_fwi"]["hasta"] = "2026-10-20"
     i = m.construir_informe(pred, ds, ent, calidad, ["temperatura", "fwi"], date(2026, 11, 19))
     assert i["deriva"]["variable_psi_max"] == "fwi"
-    assert any("Deriva" in a for a in i["avisos"]) and any("FWI lleva" in a for a in i["avisos"])
+    assert any("Fuera de lo habitual" in a for a in i["avisos"]) and any("FWI lleva" in a for a in i["avisos"])
 
 
 def test_main_escribe_json(tmp_path):
@@ -112,3 +112,40 @@ def test_main_escribe_json(tmp_path):
 def test_main_falta_entrada(tmp_path):
     pytest.importorskip("pyarrow")
     assert m.main(["--pred", str(tmp_path / "no.parquet"), "--salida", str(tmp_path / "x.json")]) == 1
+
+
+def _datos_lentos(nivel_reciente):
+    """13 otoños con un nivel propio cada año (variable lenta, como DC o BUI) y una ventana reciente."""
+    rng = np.random.default_rng(3)
+    niveles = dict(zip(range(2009, 2022), np.linspace(-6, 6, 13)))
+    trozos = []
+    for a, n in niveles.items():
+        f = pd.date_range(f"{a}-10-01", f"{a}-11-30")
+        d = pd.DataFrame({"fecha": np.repeat(f, 5)})
+        d["x"] = n + rng.normal(0, 0.3, len(d))
+        trozos.append(d)
+    ent = pd.concat(trozos, ignore_index=True)
+    ent["particion"] = "entrenamiento"
+    f = pd.date_range("2026-10-17", "2026-11-15")
+    ds = pd.DataFrame({"fecha": np.repeat(f, 10), "id_municipio": [f"{27000 + i:05d}" for i in range(10)] * len(f)})
+    ds["x"] = nivel_reciente + rng.normal(0, 0.3, len(ds))
+    pred, _, _, calidad = _datos()
+    return pred, ds, ent, calidad
+
+
+def _fila(informe, variable="x"):
+    return next(f for f in informe["deriva"]["variables"] if f["variable"] == variable)
+
+
+def test_variable_lenta_normal_no_da_deriva_aunque_el_psi_sea_enorme():
+    pred, ds, ent, calidad = _datos_lentos(nivel_reciente=2.0)      # dentro del rango de los años de entrenamiento
+    f = _fila(m.construir_informe(pred, ds, ent, calidad, ["x"], date(2026, 11, 19)))
+    assert f["psi"] > m.PSI_DERIVA * 10          # el PSI se satura: por eso no es el criterio
+    assert f["n_anios_historico"] == 13 and abs(f["z"]) < m.Z_VIGILAR and f["estado"] == "estable"
+
+
+def test_variable_lenta_fuera_de_todos_los_anios_da_deriva():
+    pred, ds, ent, calidad = _datos_lentos(nivel_reciente=15.0)
+    i = m.construir_informe(pred, ds, ent, calidad, ["x"], date(2026, 11, 19))
+    assert _fila(i)["estado"] == "deriva" and i["deriva"]["variable_z_max"] == "x"
+    assert any("Fuera de lo habitual" in a for a in i["avisos"])

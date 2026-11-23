@@ -2,7 +2,8 @@
 
 Sigue el contrato de datos con ML (``docs/contrato_dashboard_gold.md``):
 
-* Solo se leen ``predicciones.parquet`` y ``explicaciones.parquet`` de Gold. Por
+* Solo se leen ``predicciones.parquet`` y ``explicaciones.parquet`` de Gold (y, si existe,
+  ``monitorizacion.json`` para la pestaña «Estado del sistema»). Por
   defecto se descargan del dataset de Hugging Face (``HF_TOKEN`` de lectura); si
   no hay conexión, se usan los de ``data/gold`` (``PIRISCOPE_DASHBOARD_ORIGEN=local``
   los usa siempre).
@@ -34,6 +35,10 @@ RESULTADOS_DIR = config.REPO_ROOT / "docs" / "resultados"
 
 FICHEROS_GOLD = ("predicciones.parquet", "explicaciones.parquet")
 RUTA_GOLD_EN_HF = "data/gold"
+FICHERO_MONITORIZACION = "monitorizacion.json"   # opcional: lo genera src/ml/monitorizar.py
+VERSION_ESQUEMA_MONITORIZACION = 1
+ESTADOS_DERIVA = {"estable": "Estable", "vigilar": "Vigilar", "deriva": "Fuera de lo habitual",
+                  "sin_datos": "Sin datos"}   # «deriva» es la clave interna del JSON; esto es lo que se muestra
 
 NIVELES = ("bajo", "medio", "alto")
 SIN_DATO = "sin dato"
@@ -209,6 +214,55 @@ def tiene_columnas_dec50(expl: pd.DataFrame) -> bool:
     """Si las explicaciones traen ``valor_variable``, ``valor_base`` y ``shap_resto`` con datos."""
     columnas = ("valor_variable", "valor_base", "shap_resto")
     return all(c in expl.columns for c in columnas) and expl["valor_base"].notna().any()
+
+
+# ---------------------------------------------------------------------------
+# Monitorización del sistema (opcional)
+# ---------------------------------------------------------------------------
+def leer_monitorizacion(forzar_descarga: bool = False, gold_dir: Path | None = None) -> dict | None:
+    """`monitorizacion.json` de Gold (Hugging Face o local) o `None` si no hay ninguno utilizable.
+
+    Nunca lanza: la pestaña «Estado del sistema» es un añadido y no debe impedir que el dashboard arranque.
+    Un fichero con otra ``version_esquema`` se ignora.
+    """
+    gold_dir = Path(gold_dir or config.GOLD_DIR)
+    candidatos: list[Path] = []
+    if os.getenv("PIRISCOPE_DASHBOARD_ORIGEN", "hf").strip().lower() != "local":
+        try:
+            from huggingface_hub import hf_hub_download
+
+            cfg = config.HuggingFaceConfig()
+            candidatos.append(Path(hf_hub_download(cfg.repo_id, f"{RUTA_GOLD_EN_HF}/{FICHERO_MONITORIZACION}",
+                                                   repo_type=cfg.repo_type, token=_token(),
+                                                   force_download=forzar_descarga)))
+        except Exception as exc:  # noqa: BLE001 - sin conexión, sin acceso o aún sin publicar
+            log.info("%s no disponible en Hugging Face (%s)", FICHERO_MONITORIZACION, type(exc).__name__)
+    candidatos.append(gold_dir / FICHERO_MONITORIZACION)
+    for ruta in candidatos:
+        try:
+            contenido = json.loads(ruta.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(contenido, dict) and contenido.get("version_esquema") == VERSION_ESQUEMA_MONITORIZACION:
+            return contenido
+    return None
+
+
+def tabla_ventana(mon: dict) -> pd.DataFrame:
+    """Una fila por fecha de la ventana: cobertura, % de respaldo y número de municipios por nivel."""
+    columnas = ["fecha", "cobertura_pct", "pct_respaldo", "pct_medio_alto", *NIVELES]
+    filas = [{"fecha": pd.Timestamp(f["fecha"]), "cobertura_pct": f["cobertura_pct"],
+              "pct_respaldo": f["pct_respaldo"], "pct_medio_alto": f["pct_medio_alto"],
+              **{n: f["niveles"].get(n, 0) for n in NIVELES}}
+             for f in mon["predicciones"]["ventana"]["por_fecha"]]
+    return pd.DataFrame(filas, columns=columnas)
+
+
+def tabla_deriva(mon: dict) -> pd.DataFrame:
+    """Una fila por variable: desviación (z) frente a los años de entrenamiento, PSI informativo y estado."""
+    columnas = ["variable", "z", "psi", "psi_historico_max", "estado", "media_reciente", "media_historica",
+                "n_anios_historico", "n_reciente", "nulos_pct_reciente", "nulos_pct_referencia"]
+    return pd.DataFrame(mon["deriva"]["variables"], columns=columnas)
 
 
 # ---------------------------------------------------------------------------
