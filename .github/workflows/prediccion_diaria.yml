@@ -1,5 +1,5 @@
 # Predicción diaria automática: se lanza cuando termina bien "Ingesta automática".
-# Silver -> Gold -> inferencia -> verificación -> publicación en Hugging Face.
+# Silver -> Gold -> inferencia -> verificación -> monitorización -> publicación en Hugging Face.
 # Si algo falla, abre (o comenta) una issue con el enlace al log.
 #
 # Secret: HF_TOKEN (el mismo de la ingesta; lectura + escritura sobre el dataset).
@@ -105,6 +105,17 @@ jobs:
             --dataset data/gold/dataset_municipio_dia.parquet --models-dir models \
             --modelo "$MODELO" --respaldo "$RESPALDO"
 
+      # Antes de publicar: así monitorizacion.json se sube en el mismo commit que las predicciones.
+      # continue-on-error: un fallo de la monitorización nunca debe impedir publicar las predicciones.
+      - name: Monitorización
+        id: monitorizacion
+        continue-on-error: true
+        run: python -m src.ml.monitorizar --resumen-md "$GITHUB_STEP_SUMMARY"
+
+      - name: Aviso si falla la monitorización
+        if: steps.monitorizacion.outcome == 'failure'
+        run: echo "::warning title=Monitorización::monitorizar.py ha fallado; se publican las predicciones sin monitorizacion.json"
+
       - name: Publicar en Hugging Face
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -125,6 +136,7 @@ jobs:
             data/silver/informes/informe_calidad.json
             data/silver/informes/validacion.json
             data/gold/gold_informe.json
+            data/gold/monitorizacion.json
           if-no-files-found: ignore
           retention-days: 30
 

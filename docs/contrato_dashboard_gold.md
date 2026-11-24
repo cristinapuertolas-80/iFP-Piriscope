@@ -1,9 +1,9 @@
 # Contrato de datos entre ML y Dashboard (capa Gold)
 
-**Versión:** 1.4 · **Fecha:** 2026-10-31 · **Responsable ML:** Hikari · **Consumidor:** Frontend (Streamlit)
-**Decisiones relacionadas:** DEC-12, DEC-14, DEC-41, DEC-42, DEC-43, DEC-47, DEC-48, DEC-49, DEC-50
+**Versión:** 1.5 · **Fecha:** 2026-11-24 · **Responsable ML:** Hikari · **Consumidor:** Frontend (Streamlit)
+**Decisiones relacionadas:** DEC-12, DEC-14, DEC-41, DEC-42, DEC-43, DEC-47, DEC-48, DEC-49, DEC-50, DEC-53, DEC-55, DEC-56
 
-El dashboard **solo lee ficheros Parquet de `data/gold/`**. No carga modelos, no lee Bronze ni Silver y no accede a fuentes externas (NF2, apartado 5.6). Este documento fija qué garantiza Gold y qué debe hacer el dashboard con cada caso.
+El dashboard **solo lee ficheros de `data/gold/`** (Parquet y un JSON opcional de monitorización). No carga modelos, no lee Bronze ni Silver y no accede a fuentes externas (NF2, apartado 5.6). Este documento fija qué garantiza Gold y qué debe hacer el dashboard con cada caso.
 
 ---
 
@@ -13,8 +13,9 @@ El dashboard **solo lee ficheros Parquet de `data/gold/`**. No carga modelos, no
 |---|---|---|
 | `data/gold/predicciones.parquet` | Una predicción vigente por municipio y fecha | Hasta 313 por fecha |
 | `data/gold/explicaciones.parquet` | Las 5 variables con más peso por predicción (SHAP) | 5 por predicción |
+| `data/gold/monitorizacion.json` | Estado del sistema en la última ejecución (**opcional**) | Un solo documento |
 
-Ambos se regeneran con `python -m src.ml.inferir`. Tras cada regeneración se comprueban con `verificar_salidas.py`.
+Los dos primeros se regeneran con `python -m src.ml.inferir`. Tras cada regeneración se comprueban con `verificar_salidas.py`. `monitorizacion.json` lo genera `python -m src.ml.monitorizar` (DEC-56).
 
 ### `predicciones.parquet`
 
@@ -41,6 +42,30 @@ Ambos se regeneran con `python -m src.ml.inferir`. Tras cada regeneración se co
 | `shap_resto` | decimal | Suma de las contribuciones de las variables fuera del top-5; igual en las 5 filas (DEC-50) |
 
 **Compatibilidad:** el dashboard debe ignorar las columnas que no conozca y no depender del orden de las columnas. Se pueden añadir columnas (ver sección 7) sin avisar de ruptura.
+
+### `monitorizacion.json` (opcional)
+
+Documento JSON con el estado del sistema en la última ejecución (DEC-56). **Es opcional**: si el fichero no existe, no se puede leer o su `version_esquema` no es la esperada (hoy `1`), el dashboard lo ignora y muestra solo un aviso informativo en la pestaña «Estado del sistema». Nunca debe fallar por ello. Ignorar las claves que no conozca.
+
+| Clave | Contenido |
+|---|---|
+| `version_esquema` | Entero. Hoy `1` |
+| `generado_utc` | Cuándo se generó (ISO 8601, UTC) |
+| `estado`, `avisos`, `info` | `estado` es `ok` o `revisar` (`revisar` si hay algún aviso). `avisos` y `info` son listas de textos: los avisos piden atención; la información (p. ej. «las últimas N fechas se predicen con el respaldo») no |
+| `modelo` | `principal` y `respaldo`: identificadores de los modelos usados |
+| `predicciones.ultima_fecha_objetivo` | Última fecha predicha; coincide con `pred["fecha_objetivo"].max()` |
+| `predicciones.ultima_fecha` | Para esa fecha: `municipios` con predicción, `cobertura_pct`, `pct_respaldo`, `niveles` (`bajo`, `medio`, `alto`), `pct_medio_alto` y `probabilidades_distintas` |
+| `predicciones.dias_finales_con_respaldo` | Fechas finales consecutivas con más del 50 % de predicciones de respaldo |
+| `predicciones.ventana.por_fecha` | Los mismos datos, una entrada por fecha de los últimos 30 días |
+| `fuentes.aemet`, `fuentes.fwi` | `hasta` (último dato) y `retraso_dias` respecto a la ejecución. En el FWI, además, `retraso_vs_meteo_dias`, `dias_intermedio` y `meses_intermedio` |
+| `deriva.variables` | Por variable del modelo: `z`, `estado` (`estable`, `vigilar`, `deriva` o `sin_datos`), `media_reciente`, `media_historica`, `psi` (solo informativo), `nulos_pct_reciente` y `nulos_pct_referencia` |
+| `deriva.umbrales`, `deriva.z_max_abs`, `deriva.variable_z_max` | Umbrales usados (z de 2 y de 3, en valor absoluto) y la mayor desviación con su variable |
+
+Reglas:
+
+- El estado `deriva` se muestra como **«Fuera de lo habitual»**. No es un fallo del modelo: puede ser, por ejemplo, un otoño muy seco.
+- Compara las variables de entrada con los mismos días del año de los años de entrenamiento; **no mide el acierto real del modelo** y no debe presentarse como tal.
+- `hf_hub` lo publica en el mismo commit que las predicciones solo si es válido y su `predicciones.ultima_fecha_objetivo` coincide con la última fecha de `predicciones.parquet`; si no, lo omite y publica igualmente las predicciones (DEC-53, DEC-56).
 
 ---
 
@@ -78,6 +103,7 @@ pred = (pred.sort_values(["id_municipio", "fecha_objetivo", "_resp", "fecha_inse
 | Fecha posterior a la última disponible | `fecha > pred["fecha_objetivo"].max()` | Igual que el caso anterior |
 | Día con riesgo generalizado | ≥ 90 % de los municipios de la fecha en `medio` o `alto` | Comportamiento normal en episodios de sequía (DEC-49). Mostrar un aviso informativo tipo «Episodio de riesgo elevado en toda la región», no un error |
 | Predicción sin explicaciones | Filtro vacío en `explicaciones` | Ocultar el panel SHAP con un mensaje; no debería ocurrir |
+| Sin `monitorizacion.json` (o con otra `version_esquema`) | No existe en Hugging Face ni en local, o no se puede leer | Mensaje informativo en la pestaña «Estado del sistema»; el resto del dashboard funciona igual |
 
 **Cobertura real hoy:** 313 municipios hasta el 19/10/2026 y 288 los días 20, 21 y 22 (25 municipios sin ninguna variable meteorológica). La cobertura mínima aceptada es del 80 %.
 
@@ -201,6 +227,7 @@ La figura ya cumple la accesibilidad: el sentido de cada barra se indica tambié
 | Nuevos umbrales o forma de definir los niveles | DEC-49 | Cambian los valores de `nivel_riesgo`, no las columnas. No fijar umbrales en el código |
 | `version_modelo` distinta de `v1` (p. ej. `v2`) tras reentrenar | HU-11 | No suponer que solo existe `v1`; tratar como respaldo todo lo que termine en `-respaldo` |
 | Columna indicando el modelo de respaldo | Posible | Hoy se deduce del sufijo de `version_modelo` |
+| `monitorizacion.json` (opcional) | DEC-56 | Ya implementado: pestaña «Estado del sistema». Si falta, se ignora |
 
 ---
 
@@ -211,8 +238,9 @@ La figura ya cumple la accesibilidad: el sentido de cada barra se indica tambié
 3. **Importancia global:** `docs/resultados/shap_global.csv` y `shap_global_grupos.csv`, que genera `inferir --ejemplo-dir docs/resultados`.
 4. **Prioridad relativa:** se muestra como «Prioridad relativa hoy: top N %», calculada por fecha y por versión de modelo. Sigue siendo provisional hasta confirmar DEC-49.
 5. **Aviso de episodio de riesgo generalizado:** con al menos el 90 % de los municipios con predicción en «medio» o «alto»; mensaje informativo, no error.
+6. **Estado del sistema:** pestaña que lee `monitorizacion.json` (opcional) y muestra los avisos, la cobertura, el uso del respaldo y los niveles de los últimos 30 días, los retrasos de AEMET y del FWI y la desviación de las variables de entrada frente al entrenamiento. El estado `deriva` se muestra como «Fuera de lo habitual» (DEC-56).
 
-**Publicación:** `python -m src.ml.hf_hub` o `run_pipeline.py --etapas ml --subir-hf` suben ambos ficheros a `data/gold/` del dataset de Hugging Face en un único commit, tras comprobar que son coherentes (DEC-53). Pendiente de probar con el dataset real.
+**Publicación:** `python -m src.ml.hf_hub` o `run_pipeline.py --etapas ml --subir-hf` suben ambos ficheros (y `monitorizacion.json`, si es válido y actual) a `data/gold/` del dataset de Hugging Face en un único commit, tras comprobar que son coherentes (DEC-53, DEC-56). En producción lo ejecuta `.github/workflows/prediccion_diaria.yml` tras cada ingesta correcta, y publica de verdad solo con la variable de repositorio `HF_PUBLICAR=true` (DEC-55). Pendiente de probar con el dataset real.
 
 ---
 
@@ -233,6 +261,7 @@ La figura ya cumple la accesibilidad: el sentido de cada barra se indica tambié
 | Respaldo | Las filas `v1-respaldo` llevan la etiqueta «Estimación sin FWI» y FWI «no disponible» |
 | Casos límite | Fecha sin datos, fecha futura y predicción sin explicaciones no producen errores |
 | Smoke test | El dashboard arranca y lee `predicciones.parquet` (NF2, apartado 12) |
+| Estado del sistema | La pestaña muestra los avisos y los gráficos de `monitorizacion.json`; sin el fichero muestra un mensaje y el resto del dashboard funciona |
 
 ---
 

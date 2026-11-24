@@ -2,7 +2,7 @@
 
 Estima la **probabilidad de que un municipio registre al menos un parte de incendio el día D+1**, a partir de la información disponible hasta el día D (apartado 5.4 del diseño técnico, HU-06 a HU-08). Lee el dataset de entrenamiento de la capa Gold, compara el modelo con el baseline FWI y escribe las predicciones en Gold. Las explicaciones SHAP están en [`src/explainability`](../explainability/README.md).
 
-> **Estado:** el entrenamiento, la evaluación, la inferencia batch y SHAP están implementados y **ejecutados sobre el dataset real de Gold** (resultados en [`docs/resultados`](../../docs/resultados/README.md)), y se lanzan desde `run_pipeline.py --etapas ml` (HU-11). Pendiente: decidir la política de niveles de riesgo (DEC-49) y comparar el FWI intermedio con el consolidado.
+> **Estado:** el entrenamiento, la evaluación, la inferencia batch y SHAP están implementados y **ejecutados sobre el dataset real de Gold** (resultados en [`docs/resultados`](../../docs/resultados/README.md)), y se lanzan desde `run_pipeline.py --etapas ml` (HU-11). Pendiente: decidir la política de niveles de riesgo (DEC-49) y comparar el FWI intermedio con el consolidado. La predicción diaria y la monitorización se ejecutan solas en GitHub Actions tras cada ingesta (DEC-55, DEC-56).
 
 ## Resultado
 
@@ -23,7 +23,9 @@ El modelo con FWI (`con_fwi`) **mejora al FWI** en los tres escenarios de test (
 | `walkforward.py` | Validación walk-forward: repite la comparación con el FWI en varios años. Con `--guardar-predicciones` guarda las probabilidades y los umbrales de cada pliegue |
 | `inferir.py` | Inferencia batch con el modelo guardado: dominio del modelo, modelo de respaldo, predicciones, explicaciones SHAP, avisos de calidad y figuras de ejemplo |
 | `modelos_hf.py` | Descarga y subida de Hugging Face los modelos versionados (`models/<versión>_*`: `.joblib`, `.json` y `_umbrales.json`) a `models/`. Descarga: `python -m src.ml.modelos_hf [--version v1]` o `run_pipeline.py --etapas ml --descargar-modelos` (DEC-54). Subida, en un único commit: `python -m src.ml.modelos_hf --subir --version v1 [--dry-run]` |
-| `hf_hub.py` | Publica `predicciones.parquet` y `explicaciones.parquet` en el dataset de Hugging Face en un único commit, tras comprobar que son coherentes (DEC-53). `python -m src.ml.hf_hub [--dry-run]` o `run_pipeline.py --etapas ml --subir-hf` |
+| `hf_hub.py` | Publica `predicciones.parquet` y `explicaciones.parquet` en el dataset de Hugging Face en un único commit, tras comprobar que son coherentes (DEC-53). Si hay un `monitorizacion.json` válido y de la misma última fecha, lo incluye en el mismo commit (DEC-56). `python -m src.ml.hf_hub [--dry-run]` o `run_pipeline.py --etapas ml --subir-hf` |
+| `monitorizar.py` | Genera `data/gold/monitorizacion.json` (DEC-56): cobertura, uso del respaldo y niveles de los últimos 30 días, retraso de AEMET y del FWI y desviación (z-score, con PSI informativo) de las variables del modelo frente a los mismos días de los años de entrenamiento. `python -m src.ml.monitorizar [--resumen-md FICHERO]`. Informativo: no falla por haber avisos |
+| [`scripts/comparar_modelos.py`](../../scripts/comparar_modelos.py) | Compara dos versiones de modelo (p. ej. `v1` y `v1-check`): el `.json` de cada variante y su `_umbrales.json`, con tolerancia relativa. Comprueba la reproducibilidad del reentrenamiento (DEC-57) |
 | [`scripts/verificar_salidas.py`](../../scripts/verificar_salidas.py) | Comprueba `predicciones.parquet` y `explicaciones.parquet` (unicidad, cobertura, niveles frente a umbrales, reconstrucción de la probabilidad con SHAP). `run_pipeline.py --etapas ml` lo ejecuta tras la inferencia |
 
 ## Contrato de entrada (tabla de entrenamiento de Gold)
@@ -130,6 +132,8 @@ python scripts/verificar_salidas.py --pred data/gold/predicciones.parquet --expl
 - **Avisos** por stderr: cobertura baja (`--min-cobertura`), fechas con casi todos los municipios en «medio» o «alto» (`--aviso-alarmas`), muchos nulos meteorológicos en el último día y retraso respecto a hoy (`--max-retraso`).
 - **Figuras de ejemplo** (`--ejemplo-dir`): se generan después de escribir las salidas; si fallan, el código de salida es 2 pero las predicciones ya están escritas.
 - **Publicación en Hugging Face (DEC-53):** `python -m src.ml.hf_hub` (o `run_pipeline.py --etapas ml --subir-hf`, que publica tras inferir y verificar) sube las predicciones y las explicaciones a `data/gold/` del dataset, de donde las descarga el dashboard. Necesita un token con permiso de escritura; `--dry-run` comprueba sin subir.
+- **Predicción diaria automática (DEC-55):** `.github/workflows/prediccion_diaria.yml` ejecuta esta cadena tras cada ingesta correcta (Silver, Gold, modelos desde Hugging Face, inferencia de los últimos 30 días, `verificar_salidas.py`, monitorización y publicación). Antes de inferir recupera de Hugging Face las predicciones y explicaciones ya publicadas, porque la publicación sustituye los ficheros completos. Publica de verdad solo con la variable de repositorio `HF_PUBLICAR=true`; sin ella ejecuta `hf_hub --dry-run`.
+- **Monitorización (DEC-56):** `python -m src.ml.monitorizar` escribe `data/gold/monitorizacion.json` a partir de las predicciones, el dataset de Gold, el dataset de entrenamiento y `informe_calidad.json` de Silver. Marca como «fuera de lo habitual» (z de 3 o más) las variables cuya media de los últimos 30 días se aleja de la de esos mismos días del año en los años de entrenamiento; el PSI se calcula, pero no decide, porque se satura en las variables lentas (FWI, DC, DMC, BUI). Los umbrales son provisionales y están al principio del módulo.
 
 ### Análisis auxiliares
 
@@ -141,6 +145,7 @@ Scripts independientes (solo pandas y numpy) para estudiar las salidas y los niv
 | `analisis_niveles.py` | Lo mismo sobre la validación de 2022 con el modelo guardado (`python scripts/analisis_niveles.py`) |
 | `diagnostico_alarmas.py` | Diagnostica las fechas con casi todos los municipios en «medio» o «alto» |
 | `comparar_fwi.py` | Compara el FWI intermedio con el consolidado para un mismo mes |
+| `comparar_modelos.py` | Compara dos versiones de modelo (p. ej. `v1` y `v1-check`) para comprobar la reproducibilidad del reentrenamiento (DEC-57) |
 
 ## Variantes del modelo
 
@@ -188,13 +193,14 @@ Los umbrales se reajustan con el último año completo en cada reentrenamiento. 
 | `data/gold/predicciones.parquet` | `id_prediccion`, `id_municipio`, `fecha_objetivo`, `version_modelo` (`v1` o `v1-respaldo`), `probabilidad`, `nivel_riesgo`, `fwi` (copia del día D; nulo en el respaldo), `fecha_insert` |
 | `data/gold/explicaciones.parquet` | `id_prediccion`, `variable`, `valor_shap`, `valor_variable`, `valor_base`, `shap_resto`: las 5 variables de mayor \|SHAP\| por predicción (DEC-50). Ver [`src/explainability`](../explainability/README.md) |
 | `data/gold/informe_desarrollo.csv`, `informe_final.csv`, `informe_walkforward.csv` | Informes de evaluación. Los finales se publican en `docs/resultados/` |
+| `data/gold/monitorizacion.json` | Estado de la última ejecución: avisos, cobertura, respaldo, niveles, retrasos de las fuentes y desviación de las variables (DEC-56). Opcional; esquema en el [contrato](../../docs/contrato_dashboard_gold.md) |
 | `models/<versión>_<algoritmo>_<variante>.joblib` | Modelo serializado. Junto a él, un `.json` con versión, semilla, variables, parámetros, año inicial y variables excluidas, y un `_umbrales.json` |
 
 Al escribir, las predicciones nuevas sustituyen a las existentes del mismo municipio y `fecha_objetivo` (y a sus explicaciones) y se conserva el resto, así que reprocesar un periodo no duplica datos. En producción se predicen todos los municipios, reservados incluidos. El contrato con el dashboard está en [`docs/contrato_dashboard_gold.md`](../../docs/contrato_dashboard_gold.md).
 
 ## Decisiones
 
-Registradas en [docs/decisiones.md](../../docs/decisiones.md), DEC-37 a DEC-54 (contrato de entrada, variantes, entrenamiento, comparación con el baseline, niveles de riesgo, inferencia, SHAP, persistencia de modelos, municipios reservados, dataset de Gold, configuración del modelo, inferencia real con modelo de respaldo, niveles de riesgo, SHAP ampliado, integración en el orquestador, publicación en Hugging Face y entrega NF3).
+Registradas en [docs/decisiones.md](../../docs/decisiones.md), DEC-37 a DEC-57 (contrato de entrada, variantes, entrenamiento, comparación con el baseline, niveles de riesgo, inferencia, SHAP, persistencia de modelos, municipios reservados, dataset de Gold, configuración del modelo, inferencia real con modelo de respaldo, niveles de riesgo, SHAP ampliado, integración en el orquestador, publicación en Hugging Face, entrega NF3, predicción diaria automática, monitorización y reproducibilidad del reentrenamiento).
 
 ## Limitaciones y pendientes
 
@@ -202,7 +208,9 @@ Registradas en [docs/decisiones.md](../../docs/decisiones.md), DEC-37 a DEC-54 (
 - **Rendimiento absoluto modesto:** Precision del 2 % al 6 % con Recall ≈ 0,8, según el año. «Medio» o «alto» significa «no descartar», no «habrá un incendio». **A Coruña no mejora al FWI.**
 - **El modelo de respaldo no mejora al FWI** (`sin_fwi` equivale al FWI): las predicciones de los últimos días, sin FWI, no aportan más que el propio índice, y sus niveles discriminan poco.
 - **Desfase de los datos:** el FWI y la meteorología llegan con retraso de varios días, así que la última fecha objetivo va por detrás de hoy. No es una previsión a varios días.
-- **FWI intermedio:** los meses aún no consolidados usan el dataset intermedio, y el modelo se entrenó con el consolidado. No se ha comparado el efecto sobre las predicciones recientes (`scripts/comparar_fwi.py`).
+- **FWI intermedio:** los meses aún no consolidados usan el dataset intermedio, y el modelo se entrenó con el consolidado. No se ha comparado el efecto sobre las predicciones recientes (`scripts/comparar_fwi.py`). La monitorización de noviembre de 2026 marcó el FWI, el ISI y el BUI como «fuera de lo habitual» frente a los años de entrenamiento (DEC-56); en los datos diarios no hay un salto al pasar de consolidado a intermedio, pero la comparación directa sigue pendiente.
+- **Monitorización (DEC-56):** vigila los datos de entrada, no el acierto real del modelo. Los umbrales (z de 2 y 3, cobertura del 90 %, retrasos de 7 y 14 días) son provisionales hasta tener varias semanas de ejecuciones reales.
+- **Reproducibilidad del reentrenamiento (DEC-57):** `v1-check` reproduce `v1` (modelo y umbrales idénticos) con `experimento.py --final`. El modelo de respaldo queda con muy pocos árboles (`best_iteration` = 1), así que depende de usar las mismas versiones de las librerías (lockfile). Falta comprobarlo desde el orquestador.
 - **Probabilidad sin calibrar:** sobrestima entre 1,5 y 2,4 veces según el año y una calibración fijada en un año no se mantiene; se presenta como índice de riesgo.
 - **Niveles de riesgo:** política pendiente de confirmar (DEC-49). Los umbrales son provisionales y el Recall objetivo no se reproduce con exactitud de un año a otro.
 - **Etiquetas de 2022 y 2023:** pendiente contrastar con las estadísticas oficiales de EGIF que sean definitivas (DEC-31).
@@ -212,7 +220,8 @@ Registradas en [docs/decisiones.md](../../docs/decisiones.md), DEC-37 a DEC-54 (
 
 ```bash
 pytest tests/test_config.py tests/test_splits.py tests/test_evaluate.py tests/test_train.py tests/test_risk.py \
-       tests/test_predict.py tests/test_reservados.py tests/test_experimento.py tests/test_walkforward.py tests/test_inferir.py
+       tests/test_predict.py tests/test_reservados.py tests/test_experimento.py tests/test_walkforward.py tests/test_inferir.py \
+       tests/test_monitorizacion.py tests/test_hf_hub_monitorizacion.py
 ```
 
-Usan datos aleatorios con el esquema de Gold (`tests/toy_data.py`, fixture `toy_gold` en `tests/conftest.py`) y no necesitan red ni datos reales. Comprueban, entre otras cosas, que ninguna variante usa variables prohibidas, que el entrenamiento no toca filas reservadas ni de test, que modelo y baseline se evalúan sobre las mismas filas, que el bootstrap por bloques da intervalos más anchos con datos agrupados, que el walk-forward solo usa el pasado y no llega al año de test, y que el escenario B se recorta al periodo de entrenamiento. `test_inferir.py` cubre la inferencia: último día por defecto, rangos, dominio del modelo y respaldo, filas sin información y figuras de ejemplo.
+Usan datos aleatorios con el esquema de Gold (`tests/toy_data.py`, fixture `toy_gold` en `tests/conftest.py`) y no necesitan red ni datos reales. Comprueban, entre otras cosas, que ninguna variante usa variables prohibidas, que el entrenamiento no toca filas reservadas ni de test, que modelo y baseline se evalúan sobre las mismas filas, que el bootstrap por bloques da intervalos más anchos con datos agrupados, que el walk-forward solo usa el pasado y no llega al año de test, y que el escenario B se recorta al periodo de entrenamiento. `test_inferir.py` cubre la inferencia: último día por defecto, rangos, dominio del modelo y respaldo, filas sin información y figuras de ejemplo. `test_monitorizacion.py` cubre el cálculo de la monitorización, incluido que una variable lenta normal no da aviso aunque su PSI sea enorme, y `test_hf_hub_monitorizacion.py` que `monitorizacion.json` solo se publica si es válido y actual.

@@ -66,6 +66,7 @@ El sistema se organiza como un **pipeline de datos con arquitectura medallón** 
 - **Orquestación:** un único punto de entrada, `run_pipeline.py`, parametrizable por rango de fechas, encadena ingesta → Silver → Gold → entrenamiento/inferencia.
 - **Almacenamiento:** ficheros Parquet y CSV alojados en el dataset de Hugging Face [cpuertolas/piriscope](https://huggingface.co/datasets/cpuertolas/piriscope). No se usa base de datos en esta versión.
 - **Ingesta automática:** workflows programados (cron) de GitHub Actions que suben los datos al dataset usando un token `HF_TOKEN` guardado en los Secrets del repositorio.
+- **Predicción diaria automática:** al terminar bien la ingesta, el workflow `prediccion_diaria.yml` regenera Silver, Gold, las predicciones D+1 y la monitorización, y las publica en el dataset (DEC-55, DEC-56).
 - **Despliegue monolítico:** frontend y backend en Streamlit, pero con la lógica separada en módulos de `src/` que solo se comunican mediante ficheros Parquet y el modelo serializado.
 
 El diagrama anterior es el del diseño (NF2). La arquitectura **tal como está implementada** (módulos, comandos, ficheros intermedios, Hugging Face y workflows) está en [docs/arquitectura_implementada.png](docs/arquitectura_implementada.png).
@@ -127,6 +128,8 @@ python run_pipeline.py --desde 2020-01-01 --hasta 2024-12-31 --etapas ingesta --
 
 La actualización periódica, **diaria para AEMET y semanal para el FWI**, la ejecuta el workflow [`.github/workflows/ingesta.yml`](.github/workflows/ingesta.yml), que necesita los Secrets `AEMET_API_KEY`, `HF_TOKEN` y, para el FWI, `CDSAPI_KEY`. Periodos, frecuencias y procedimiento completo: [docs/plan_ingesta.md](docs/plan_ingesta.md).
 
+Cuando una ingesta termina bien, el workflow [`.github/workflows/prediccion_diaria.yml`](.github/workflows/prediccion_diaria.yml) se lanza solo y encadena Silver, Gold, la inferencia de los últimos 30 días, la verificación, la monitorización y la publicación en Hugging Face (usa el mismo Secret `HF_TOKEN`). **Publica de verdad solo si existe la variable de repositorio `HF_PUBLICAR=true`**; sin ella hace todo salvo subir (`hf_hub --dry-run`). Si falla, abre una issue con la etiqueta `prediccion-diaria`. También se puede lanzar a mano desde la pestaña *Actions*. Detalle: DEC-55.
+
 ### 5. Capa Silver (limpieza, tipado y cruce espacio-temporal)
 
 ```bash
@@ -161,7 +164,7 @@ python run_pipeline.py --etapas gold ml --ml-acciones entrenar inferir --version
 - `--desde` y `--hasta` delimitan la ingesta y Silver (solo son obligatorios para esas etapas). **Gold y ML trabajan sobre todo el histórico disponible**, y la inferencia predice el último día disponible salvo que se indique `--inferir-desde` y `--inferir-hasta`.
 - El entrenamiento usa la configuración de DEC-47 (XGBoost, desde 2009, sin `viento`, `scale_pos_weight=1`, variantes `con_fwi` y `sin_fwi`) en la **fase de desarrollo**, que no toca el test. Se niega a sobrescribir una versión de modelo existente salvo con `--sobrescribir-modelo`.
 - Las predicciones de los días sin FWI se hacen con el modelo de respaldo (`version_modelo = v1-respaldo`); detalle en [src/ml/README.md](src/ml/README.md).
-- Con `--subir-hf`, tras inferir y verificar se publican las predicciones y las explicaciones en el dataset de Hugging Face (`data/gold/`), de donde las descarga el dashboard. Hace falta un token con permiso de escritura; `python -m src.ml.hf_hub --dry-run` comprueba sin subir.
+- Con `--subir-hf`, tras inferir y verificar se publican las predicciones y las explicaciones en el dataset de Hugging Face (`data/gold/`), de donde las descarga el dashboard. Hace falta un token con permiso de escritura; `python -m src.ml.hf_hub --dry-run` comprueba sin subir. Si en `data/gold/` hay un `monitorizacion.json` válido y de la misma última fecha (lo genera `python -m src.ml.monitorizar`, DEC-56), se sube en el mismo commit.
 - Si falla Silver, Gold o ML, el pipeline se detiene; `--continuar` lo evita. La ingesta no detiene el pipeline si falla una fuente, pero el código de salida es 1.
 - Los modelos (`models/`) y los datos de `data/` no se suben al repositorio.
 
@@ -196,7 +199,7 @@ python run_dashboard.py
 
 La primera vez crea `.venv` (o usa el entorno activo), instala solo las librerías del dashboard, pide un token de lectura de Hugging Face y lo guarda en `.env`, y comprueba el acceso al dataset; si tu cuenta aún no lo tiene, te dice dónde aceptarlo. Después abre el dashboard en el navegador. Las siguientes veces solo lo abre. Opciones: `--cambiar-token`, `--local` (usa `data/gold/` en lugar de Hugging Face) y `--solo-preparar`.
 
-El dashboard solo lee `predicciones.parquet` y `explicaciones.parquet` de Gold, que descarga del dataset de Hugging Face (sin conexión usa `data/gold/`). Con el entorno ya preparado también se puede lanzar con `streamlit run src/dashboard/app.py`. El contrato de datos con ML está en [docs/contrato_dashboard_gold.md](docs/contrato_dashboard_gold.md) y el detalle del dashboard en [src/dashboard/README.md](src/dashboard/README.md).
+El dashboard solo lee `predicciones.parquet` y `explicaciones.parquet` de Gold (y, si existe, `monitorizacion.json`, que alimenta la pestaña «Estado del sistema»), que descarga del dataset de Hugging Face (sin conexión usa `data/gold/`). Con el entorno ya preparado también se puede lanzar con `streamlit run src/dashboard/app.py`. El contrato de datos con ML está en [docs/contrato_dashboard_gold.md](docs/contrato_dashboard_gold.md) y el detalle del dashboard en [src/dashboard/README.md](src/dashboard/README.md).
 
 ### 8. Ejecutar los tests
 
@@ -212,13 +215,14 @@ Los tests también se ejecutan automáticamente con **GitHub Actions** en cada P
 
 Estado a la entrega de NF3. El detalle de cada punto está en [docs/decisiones.md](docs/decisiones.md) (sección *Decisiones pendientes*) y en [src/ml/README.md](src/ml/README.md).
 
-- **Las predicciones no se actualizan solas.** La ingesta es automática (cron), pero Silver, Gold, inferencia y publicación se lanzan a mano con `run_pipeline.py` (`--subir-hf` publica también la Gold tras inferir y verificar, DEC-53). El dashboard muestra la última fecha publicada, no la de hoy.
+- **La publicación diaria está implementada y activada.** Tras cada ingesta correcta, `prediccion_diaria.yml` regenera Silver, Gold y las predicciones y comprueba su publicación (DEC-55), pero solo sube a Hugging Face con la variable `HF_PUBLICAR=true`; hasta entonces las predicciones publicadas no se actualizan solas (a mano, `run_pipeline.py --subir-hf` o `python -m src.ml.hf_hub`, DEC-53). Si la ingesta de un día falla (por ejemplo, por un error 500 de AEMET), esa predicción no se ejecuta y se recupera al día siguiente. El dashboard muestra la última fecha publicada, no la de hoy.
 - **Publicación en Hugging Face sin probar contra el dataset real**: `python -m src.ml.hf_hub` (Gold) y `python -m src.ml.modelos_hf --subir` (modelos) están cubiertos por tests con un cliente simulado y sus comprobaciones previas se ejecutan sobre los ficheros reales con `--dry-run` en el workflow de evidencias, pero aún no se ha hecho una subida real con ellos.
 - **El FWI llega con retraso**: los últimos días se predicen con el modelo de respaldo (sin FWI), que no mejora al FWI y discrimina poco (pocos valores distintos por día).
 - **Rendimiento modesto** frente al FWI, un solo año de test, **A Coruña no mejora** al FWI y la probabilidad no está calibrada (se presenta como índice de riesgo). Política de niveles provisional (DEC-49): en sequía casi todos los municipios quedan en «medio» o «alto».
 - **Cobertura**: ~25 municipios sin ninguna variable meteorológica en los días recientes aparecen como «Sin dato» (cobertura ≥ 80 % en todas las fechas). El viento se excluyó por tener ~57 % de nulos.
 - **Fuentes con paso manual**: las exportaciones de EGIF y los recintos del CNIG se dejan en `data/landing/`; la ingesta de AEMET y del FWI necesita sus claves.
-- **Pendiente de verificar con datos reales**: el reentrenamiento reproducible (`--ml-acciones entrenar`), comparar el FWI intermedio con el consolidado y contrastar las etiquetas de 2022-2023 con las estadísticas definitivas de EGIF.
+- **Pendiente de verificar con datos reales**: el reentrenamiento desde el orquestador (`--ml-acciones entrenar`; con `experimento.py --final` ya se comprobó que `v1-check` reproduce `v1`, DEC-57), comparar el FWI intermedio con el consolidado y contrastar las etiquetas de 2022-2023 con las estadísticas definitivas de EGIF.
+- **Monitorización**: la pestaña «Estado del sistema» vigila la cobertura, el uso del respaldo, los retrasos de las fuentes y la desviación de las variables de entrada frente al entrenamiento, con umbrales provisionales (DEC-56). No mide el acierto real del modelo.
 - **El dataset de Hugging Face es de acceso restringido**: reproducir requiere una cuenta con acceso aceptado.
 - **Detalles de interfaz**: en la tabla del día, las celdas sin valor (FWI de las estimaciones sin FWI, municipios sin dato) aparecen como «None», que es como `st.dataframe` pinta los nulos; y en la explicación SHAP el título del eje horizontal se corta en algunos anchos de pantalla.
 
@@ -274,20 +278,21 @@ iFP-Piriscope/
 │   │   ├── config.py · splits.py · train.py · evaluate.py · risk.py · predict.py
 │   │   ├── experimento.py · walkforward.py · reservados.py
 │   │   ├── inferir.py              #   inferencia con modelo principal y de respaldo + SHAP
+│   │   ├── monitorizar.py          #   monitorizacion.json: cobertura, respaldo, retrasos y desviación de las variables
 │   │   ├── hf_hub.py               #   publicación de predicciones y explicaciones de Gold en Hugging Face
 │   │   └── modelos_hf.py           #   descarga y publicación de los modelos versionados en Hugging Face
 │   ├── explainability/             # SHAP: valores, top-5 por predicción, gráficos
 │   │   └── config.py · shap_explain.py · plots.py
 │   └── dashboard/                  # Streamlit: solo lee Gold
-│       ├── app.py · datos.py · graficos.py
+│       ├── app.py · datos.py · graficos.py · graficos_estado.py
 │       └── assets/municipios_galicia.geojson
 │
 ├── tests/                          # pytest (sin red ni datos reales: datos de juguete y dobles)
-├── scripts/                        # Carga inicial (.sh/.ps1), verificación y análisis auxiliares, capturas
+├── scripts/                        # Carga inicial (.sh/.ps1), verificación, comparación de modelos y análisis auxiliares, capturas
 ├── environment/                    # requirements.txt · requirements-lock.txt · requirements-dashboard.txt
 ├── docs/                           # NF1, NF2, arquitectura, decisiones, contrato Gold, resultados
 │   └── resultados/                 #   informes de evaluación, SHAP global y ejemplos
-├── .github/workflows/              # tests.yml (cada PR) · ingesta.yml (cron) · evidencias.yml (NF3)
+├── .github/workflows/              # tests.yml (cada PR) · ingesta.yml (cron) · prediccion_diaria.yml (tras la ingesta) · evidencias.yml (NF3)
 ├── data/{bronze,silver,gold}/      # Datos (no versionados: solo .gitkeep; viven en Hugging Face)
 └── models/                         # Modelos serializados (no versionados: viven en Hugging Face)
 ```
